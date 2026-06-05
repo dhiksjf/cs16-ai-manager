@@ -5,7 +5,7 @@ An intelligent AI agent for managing CS 1.6 dedicated servers with full tool con
 real-time reasoning, planning, action verification, memory, and question-asking capabilities.
 """
 
-import asyncio, json, os, socket, stat, sys, traceback, uuid, hashlib, time, re, fnmatch, threading
+import asyncio, json, os, socket, stat, sys, traceback, uuid, hashlib, time, re, fnmatch, threading, subprocess, shutil, tempfile, html
 from pathlib import Path
 from typing import Any, Optional
 from datetime import datetime
@@ -27,6 +27,14 @@ CONFIG_FILE = HERE / 'cs16-config.json'
 STATIC_DIR = Path(os.environ.get('STATIC_DIR', HERE / 'static'))
 HTML_FILE = STATIC_DIR / 'index.html'
 DEFAULT_PORT = 8000
+
+# ─── AMX Mod X Compiler Paths ───
+# These are populated by the Docker image. The compiler is built from source
+# in the Dockerfile (alliedmodders/amxmodx) and the .inc files are bundled.
+AMXXPC_BIN = Path(os.environ.get('AMXXPC_BIN', '/usr/local/bin/amxxpc'))
+AMXX_INCLUDE_DIR = Path(os.environ.get('AMXX_INCLUDE_DIR', '/app/amxx/include'))
+AMXX_TESTSUITE_DIR = Path(os.environ.get('AMXX_TESTSUITE_DIR', '/app/amxx/testsuite'))
+AMXX_WORK_DIR = Path(os.environ.get('AMXX_WORK_DIR', '/tmp/amxx_work'))
 
 # ─── Configuration ───
 
@@ -132,6 +140,39 @@ def sftp_write(path_str: str, content: str):
         assert _sftp is not None
         with _sftp.open(path_str, 'w') as f:
             f.write(content.encode('utf-8'))
+
+def sftp_write_binary(path_str: str, content: bytes) -> None:
+    """Write raw bytes to a file via SFTP (for compiled .amxx binaries, etc.)."""
+    with _sftp_lock:
+        sftp_check()
+        sftp = _sftp
+        assert sftp is not None
+        parent = str(Path(path_str).parent).replace('\\', '/')
+        if parent and parent != '.':
+            parts = parent.split('/') if parent.startswith('/') else parent.split('/')
+            cur = '/' if parent.startswith('/') else ''
+            for p in parts:
+                if not p:
+                    continue
+                cur = cur + p if cur == '/' else f'{cur}/{p}'
+                try:
+                    sftp.stat(cur)
+                except Exception:
+                    try:
+                        sftp.mkdir(cur)
+                    except Exception:
+                        pass
+        with sftp.open(path_str, 'wb') as f:
+            f.write(content)
+
+def sftp_read_binary(path_str: str) -> bytes:
+    """Read raw bytes from a file via SFTP."""
+    with _sftp_lock:
+        sftp_check()
+        sftp = _sftp
+        assert sftp is not None
+        with sftp.open(path_str, 'rb') as f:
+            return f.read()
 
 def sftp_delete(path_str: str):
     with _sftp_lock:
@@ -523,6 +564,68 @@ TOOL_DEFS = [
             'expected': {'type': 'string', 'description': 'What you expect to find (optional)'}
         }, 'required': ['action', 'path']}
     }},
+    {'type': 'function', 'function': {
+        'name': 'read_local',
+        'description': 'Read a file from the local container filesystem. Use this to read AMX Mod X .inc API headers (e.g. /app/amxx/include/amxmodx.inc) to learn available natives, stocks, and constants before writing a plugin. Also use to read reference plugins in the testsuite.',
+        'parameters': {'type': 'object', 'properties': {
+            'path': {'type': 'string', 'description': 'Absolute local path, e.g. /app/amxx/include/amxmodx.inc or /tmp/work/myserver.sma'}
+        }, 'required': ['path']}
+    }},
+    {'type': 'function', 'function': {
+        'name': 'write_local',
+        'description': 'Write a file to the local container filesystem. Use this to create .sma source files for compilation (in /tmp/amxx_work/). Text content.',
+        'parameters': {'type': 'object', 'properties': {
+            'path': {'type': 'string', 'description': 'Absolute local path, e.g. /tmp/amxx_work/myserver.sma'},
+            'content': {'type': 'string', 'description': 'Full file content to write'}
+        }, 'required': ['path', 'content']}
+    }},
+    {'type': 'function', 'function': {
+        'name': 'list_local',
+        'description': 'List files in a local container directory. Use to browse /app/amxx/include/ for available API headers, or /app/amxx/testsuite/ for reference plugins.',
+        'parameters': {'type': 'object', 'properties': {
+            'path': {'type': 'string', 'description': 'Absolute local directory, e.g. /app/amxx/include or /app/amxx/testsuite'}
+        }, 'required': ['path']}
+    }},
+    {'type': 'function', 'function': {
+        'name': 'compile_plugin',
+        'description': 'Compile a .sma (Pawn) source file using the bundled amxxpc compiler. The .sma must already exist on the local filesystem (use write_local first). Reads include headers from /app/amxx/include/. If upload_path is given, the resulting .amxx binary is uploaded to that path on the game server. Returns the full compiler output including errors and warnings — use them to debug. Iterate: read error -> read_local the relevant .inc -> write_local the fix -> compile_plugin again until 0 errors.',
+        'parameters': {'type': 'object', 'properties': {
+            'local_path': {'type': 'string', 'description': 'Absolute local path to the .sma file, e.g. /tmp/amxx_work/myserver.sma'},
+            'upload_path': {'type': 'string', 'description': 'Optional: remote SFTP path to upload the compiled .amxx, e.g. cstrike/addons/amxmodx/plugins/myserver.amxx'}
+        }, 'required': ['local_path']}
+    }},
+    {'type': 'function', 'function': {
+        'name': 'web_search',
+        'description': 'Search the web via DuckDuckGo. Use to find AMX Mod X plugin examples, API documentation, forum threads, or solutions to compile errors. Returns titles, URLs, and snippets.',
+        'parameters': {'type': 'object', 'properties': {
+            'query': {'type': 'string', 'description': 'Search query, e.g. "amxmodx message_begin example" or "pawn register_plugin syntax"'},
+            'num_results': {'type': 'integer', 'description': 'Number of results to return (default 8, max 20)', 'default': 8}
+        }, 'required': ['query']}
+    }},
+    {'type': 'function', 'function': {
+        'name': 'web_fetch',
+        'description': 'Fetch the content of a URL and return it as text. Use to read documentation pages, GitHub READMEs, AMX Mod X wiki articles, or forum posts. Output is truncated to 12K characters.',
+        'parameters': {'type': 'object', 'properties': {
+            'url': {'type': 'string', 'description': 'Full URL to fetch, e.g. https://www.amxmodx.org/api/amxmodx/'}
+        }, 'required': ['url']}
+    }},
+    {'type': 'function', 'function': {
+        'name': 'download_file',
+        'description': 'Download a file from a URL directly to the game server via SFTP. Use to grab .amxx binaries, .sma sources, or config files from the web.',
+        'parameters': {'type': 'object', 'properties': {
+            'url': {'type': 'string', 'description': 'Full URL to download from'},
+            'dest': {'type': 'string', 'description': 'Destination path on the game server, e.g. cstrike/addons/amxmodx/plugins/myplugin.amxx'}
+        }, 'required': ['url', 'dest']}
+    }},
+    {'type': 'function', 'function': {
+        'name': 'git_clone',
+        'description': 'Shallow-clone a git repository and upload all files to the game server via SFTP. Use to pull example plugin collections, configs, or whole plugins from GitHub.',
+        'parameters': {'type': 'object', 'properties': {
+            'url': {'type': 'string', 'description': 'Git URL, e.g. https://github.com/alliedmodders/amxmodx-plugins.git'},
+            'dest': {'type': 'string', 'description': 'Destination directory on the game server, e.g. cstrike/addons/amxmodx/plugins/custom'},
+            'depth': {'type': 'integer', 'description': 'Clone depth (default 1 for shallow)', 'default': 1}
+        }, 'required': ['url', 'dest']}
+    }},
 ]
 
 # ═══════════════════════════════════════════════════════════════
@@ -587,6 +690,25 @@ SEARCH:
   search(pattern, path) — find files by name. search_content(pattern, path) — grep inside files.
   info(path) — file size/perms/mtime. batch_read(paths) — read multiple files at once.
 
+LOCAL CONTAINER (read .inc headers, write .sma sources, compile):
+  read_local(path) — read a file from the local container. Use to read AMX Mod X
+    .inc API headers at /app/amxx/include/ (amxmodx.inc, fakemeta.inc,
+    hamsandwich.inc, cstrike.inc, etc.) before writing a plugin.
+  write_local(path, content) — write a file to the local container. Use to
+    create .sma sources in /tmp/amxx_work/.
+  list_local(path) — list a local directory. Use to browse /app/amxx/include/
+    or /app/amxx/testsuite/.
+  compile_plugin(local_path, upload_path?) — compile a .sma using the bundled
+    amxxpc compiler. If upload_path is given, the .amxx is uploaded to the
+    game server. Returns compiler output including errors/warnings.
+
+WEB (look up docs, download files, clone repos):
+  web_search(query, num_results=8) — DuckDuckGo search. Use to find AMX Mod X
+    plugin examples, API docs, or solutions to compile errors.
+  web_fetch(url) — fetch a URL's content as text (truncated to 12K chars).
+  download_file(url, dest) — download a file from a URL directly to the server.
+  git_clone(url, dest, depth=1) — shallow-clone a git repo to the server.
+
 SERVER:
   rcon(command) — send RCON to CS 1.6 server. append(path, content) — add to end of file.
   verify(action, path, expected) — confirm an action worked.
@@ -603,6 +725,71 @@ CRITICAL RULES
 - Admin auth: STEAM_0:X:XXXXXXXX format in users.ini — always prefer Steam ID.
 - RCON failing: check sv_rcon_password matches, server may need -rcon flag on start.
 - If RCON works, always verify config changes live with RCON status/cvarlist.
+
+═══════════════════════════════════════════════════════════════
+PLUGIN DEVELOPMENT (AMX Mod X / Pawn)
+═══════════════════════════════════════════════════════════════
+
+You can create, compile, debug, and deploy AMX Mod X plugins from a blank prompt.
+
+COMPILER ENVIRONMENT (inside the container):
+  amxxpc binary:   /usr/local/bin/amxxpc
+  AMX Mod X SDK:   /app/amxx/include/  (140 .inc files: amxmodx.inc, fakemeta.inc,
+                                         hamsandwich.inc, cstrike.inc, reapi.inc,
+                                         engine.inc, nvault.inc, sqlx.inc, json.inc,
+                                         xs.inc, and many more)
+  Reference tests: /app/amxx/testsuite/  (25 sample plugins you can read for patterns)
+  Work dir:        /tmp/amxx_work/       (write your .sma sources here)
+
+PAWN / AMX MOD X SYNTAX QUICK REFERENCE:
+  - Every plugin starts with: #include <amxmodx> then #include <amxmodx_sock> (etc. as needed)
+  - Register: public plugin_init() { register_plugin("Name", "Version", "Author") }
+  - Main: public plugin_cfg() or use register_menuid / register_event / register_logevent
+  - Client command: public client_command(id) { if (equali(read_argv(1), "say") ...) }
+  - Chat: register_clcmd("say", "handle_say")
+  - Player info: get_user_name(id), get_user_userid(id), get_user_authid(id)
+  - For non-stock plugins you may need specific includes (e.g. <cstrike> for CS natives,
+    <fakemeta> for FM_*, <hamsandwich> for RegisterHam, <reapi> for ReGameDll API)
+
+STANDARD PLUGIN CREATION WORKFLOW:
+  1. PLAN: State the plugin's behavior and which natives/modules it needs.
+  2. RESEARCH: If you're unsure about a native, read the .inc file:
+       read_local("/app/amxx/include/amxmodx.inc")  -> search for the function
+       read_local("/app/amxx/include/fakemeta.inc")  -> FM_*
+       read_local("/app/amxx/include/hamsandwich.inc")  -> RegisterHam
+     Or use web_search / web_fetch to look up "amxmodx <topic>" or
+     "alliedmodders <topic>".
+     You can also read examples: list_local("/app/amxx/testsuite") then
+     batch_read the relevant .sma files.
+  3. WRITE THE SOURCE:
+       write_local("/tmp/amxx_work/myserver.sma", <full source code>)
+  4. COMPILE + UPLOAD:
+       compile_plugin(
+         local_path = "/tmp/amxx_work/myserver.sma",
+         upload_path = "cstrike/addons/amxmodx/plugins/myserver.amxx"
+       )
+     If success=false, parse the errors (file:line: error message), read the
+     relevant .inc, fix with write_local, and compile_plugin again. Iterate
+     until success=true.
+  5. ENABLE THE PLUGIN:
+       read("cstrike/addons/amxmodx/configs/plugins.ini")
+       edit( ... add "myserver.amxx" on its own line, no semicolon, no quotes ... )
+  6. ACTIVATE LIVE:
+       rcon("amxx plugins reload")   // or "restart" for a hard restart
+     Verify with: rcon("amxx plugins") to see the plugin loaded.
+
+EXAMPLES OF PLUGIN REQUESTS YOU CAN HANDLE:
+  - "Create a plugin that announces headshots"        -> register_event("DeathMsg", ...)
+  - "Make a plugin giving a /menu command"            -> register_menuid + register_menucmd
+  - "Build a VIP plugin that gives extra money"       -> cs_set_user_money
+  - "Anti-flood chat plugin"                          -> client_command + set_task
+
+DOWNLOADING EXISTING PLUGINS:
+  - To grab a known plugin from GitHub: git_clone("https://github.com/.../plugin.git",
+    "cstrike/addons/amxmodx/plugins/customplugin")
+  - To fetch a single .amxx: download_file(url, "cstrike/addons/amxmodx/plugins/x.amxx")
+  - For source: download_file(sma_url, "cstrike/addons/amxmodx/plugins-custom/x.sma"),
+    then compile_plugin(local_path_of_downloaded_file, "cstrike/.../x.amxx")
 
 ═══════════════════════════════════════════════════════════════
 RCON COMMAND REFERENCE
@@ -685,6 +872,25 @@ def tool_result_text(action, fn_args, result, error):
         return str(result)
     if action == 'ask_user':
         return f"Question asked: {fn_args.get('question', '')}"
+    if action == 'compile_plugin':
+        if isinstance(result, dict):
+            if result.get('success'):
+                out = f"Compiled OK ({result.get('amxx_size', '?')} bytes)"
+                if result.get('uploaded_to'):
+                    out += f" — uploaded to {result['uploaded_to']}"
+                if result.get('output'):
+                    out += f"\n{result['output']}"
+                return out
+            parts = [f"Compile FAILED (rc={result.get('return_code', '?')})"]
+            if result.get('errors'):
+                parts.append(f"stderr: {result['errors']}")
+            if result.get('output'):
+                parts.append(f"stdout: {result['output']}")
+            if result.get('upload_error'):
+                parts.append(f"upload: {result['upload_error']}")
+            return '\n'.join(parts)
+    if action in ('read_local', 'write_local', 'list_local', 'web_search', 'web_fetch', 'download_file', 'git_clone'):
+        return str(result)
     if isinstance(result, str):
         return result
     return str(result)
@@ -1182,6 +1388,171 @@ async def agent_stream(req: AgentReq):
                         result_val = f"Waiting for user answer: {args.get('question', '')}"
                         waiting_for_answer = True
 
+                    elif name == 'read_local':
+                        p = Path(args['path'])
+                        if not p.exists():
+                            result_val = f"File not found: {p}"
+                        else:
+                            try:
+                                content = p.read_text(encoding='utf-8', errors='replace')
+                            except Exception as e:
+                                content = p.read_bytes().decode('utf-8', errors='replace')
+                            if len(content) > 12000:
+                                content = content[:12000] + f"\n\n[Truncated at 12K of {p.stat().st_size} bytes total]"
+                            result_val = content
+
+                    elif name == 'write_local':
+                        p = Path(args['path'])
+                        p.parent.mkdir(parents=True, exist_ok=True)
+                        p.write_text(args['content'], encoding='utf-8')
+                        result_val = f"Written {len(args['content'])} chars to {p}"
+
+                    elif name == 'list_local':
+                        p = Path(args['path'])
+                        if not p.exists():
+                            result_val = f"Directory not found: {p}"
+                        elif not p.is_dir():
+                            result_val = f"Not a directory: {p}"
+                        else:
+                            entries = []
+                            for child in sorted(p.iterdir()):
+                                kind = '[DIR]' if child.is_dir() else str(child.stat().st_size)
+                                entries.append(f"{kind} {child.name}")
+                            if len(entries) > 200:
+                                entries = entries[:200] + [f'... and {len(entries) - 200} more']
+                            result_val = '\n'.join(entries) if entries else '(empty directory)'
+
+                    elif name == 'compile_plugin':
+                        sma_path = Path(args['local_path'])
+                        upload_path = args.get('upload_path')
+
+                        if not AMXXPC_BIN.exists():
+                            err_text = f"Compiler not found at {AMXXPC_BIN} — Docker image missing amxxpc binary"
+                        elif not sma_path.exists():
+                            err_text = f"Source file not found: {sma_path}"
+                        else:
+                            include_arg = f'-i{AMXX_INCLUDE_DIR}'
+                            try:
+                                proc_result = subprocess.run(
+                                    [str(AMXXPC_BIN), include_arg, str(sma_path)],
+                                    capture_output=True, text=True, timeout=30,
+                                    cwd=str(sma_path.parent)
+                                )
+                            except subprocess.TimeoutExpired:
+                                err_text = "Compilation timed out after 30s"
+                                proc_result = None
+
+                            if proc_result is not None:
+                                amxx_path = sma_path.with_suffix('.amxx')
+                                response_obj: dict[str, Any] = {
+                                    'success': proc_result.returncode == 0 and amxx_path.exists(),
+                                    'return_code': proc_result.returncode,
+                                    'output': proc_result.stdout,
+                                    'errors': proc_result.stderr,
+                                }
+                                if response_obj['success']:
+                                    response_obj['amxx_size'] = amxx_path.stat().st_size
+                                    response_obj['amxx_path'] = str(amxx_path)
+                                    if upload_path:
+                                        try:
+                                            binary_content = amxx_path.read_bytes()
+                                            sftp_write_binary(upload_path, binary_content)
+                                            response_obj['uploaded_to'] = upload_path
+                                        except Exception as up_e:
+                                            response_obj['upload_error'] = str(up_e)
+                                            response_obj['success'] = False
+                                result_val = response_obj
+
+                    elif name == 'web_search':
+                        query = args['query']
+                        num = int(args.get('num_results', 8))
+                        num = max(1, min(num, 20))
+                        try:
+                            async with httpx.AsyncClient(timeout=20) as client:
+                                resp = await client.get(
+                                    'https://html.duckduckgo.com/html/',
+                                    params={'q': query},
+                                    headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'}
+                                )
+                            html_body = resp.text
+                            pat = re.compile(
+                                r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
+                                r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+                                re.DOTALL
+                            )
+                            results: list[str] = []
+                            for m in pat.finditer(html_body):
+                                url_h, title_h, snippet_h = m.groups()
+                                title = re.sub(r'<[^>]+>', '', title_h).strip()
+                                snippet = re.sub(r'<[^>]+>', '', snippet_h).strip()
+                                title = html.unescape(title)
+                                snippet = html.unescape(snippet)
+                                url_h = html.unescape(url_h)
+                                results.append(f"**{title}**\n{url_h}\n{snippet}")
+                                if len(results) >= num:
+                                    break
+                            if not results:
+                                result_val = f"No results found for: {query}"
+                            else:
+                                result_val = f"Search results for '{query}':\n\n" + '\n\n---\n\n'.join(results)
+                        except Exception as se:
+                            err_text = f"Web search failed: {se}"
+
+                    elif name == 'web_fetch':
+                        url = args['url']
+                        try:
+                            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+                                resp = await client.get(
+                                    url,
+                                    headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'}
+                                )
+                            text = resp.text
+                            if len(text) > 12000:
+                                text = text[:12000] + f"\n\n[Truncated at 12K chars of {len(resp.text)} total]"
+                            result_val = f"HTTP {resp.status_code} — {url}\n\n{text}"
+                        except Exception as fe:
+                            err_text = f"Fetch failed: {fe}"
+
+                    elif name == 'download_file':
+                        url = args['url']
+                        dest = args['dest']
+                        try:
+                            async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+                                resp = await client.get(url)
+                            content_bytes = resp.content
+                            sftp_write_binary(dest, content_bytes)
+                            result_val = f"Downloaded {len(content_bytes)} bytes ({resp.status_code}) from {url} to {dest}"
+                        except Exception as de:
+                            err_text = f"Download failed: {de}"
+
+                    elif name == 'git_clone':
+                        url = args['url']
+                        dest = args['dest']
+                        depth = int(args.get('depth', 1))
+                        try:
+                            with tempfile.TemporaryDirectory() as tmpdir:
+                                proc = subprocess.run(
+                                    ['git', 'clone', '--depth', str(depth), url, tmpdir],
+                                    capture_output=True, text=True, timeout=120
+                                )
+                                if proc.returncode != 0:
+                                    err_text = f"Git clone failed: {proc.stderr.strip()[:300]}"
+                                else:
+                                    count = 0
+                                    for root, _dirs, files in os.walk(tmpdir):
+                                        for fname in files:
+                                            local_f = Path(root) / fname
+                                            rel = local_f.relative_to(tmpdir)
+                                            remote_f = str(Path(dest) / rel).replace('\\', '/')
+                                            data = local_f.read_bytes()
+                                            sftp_write_binary(remote_f, data)
+                                            count += 1
+                                    result_val = f"Cloned {count} files from {url} to {dest}"
+                        except subprocess.TimeoutExpired:
+                            err_text = "Git clone timed out after 120s"
+                        except Exception as ge:
+                            err_text = f"Git clone error: {ge}"
+
                     else:
                         err_text = f'Unknown tool: {name}'
 
@@ -1477,6 +1848,74 @@ async def api_rcon(req: RCONReq):
     try:
         resp = await rcon_send(rh, gp, rp, req.command)
         return {'ok': True, 'response': resp}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
+@app.get('/api/compiler/status')
+async def api_compiler_status():
+    return {
+        'ok': True,
+        'amxxpc': str(AMXXPC_BIN),
+        'amxxpc_exists': AMXXPC_BIN.exists(),
+        'include_dir': str(AMXX_INCLUDE_DIR),
+        'include_exists': AMXX_INCLUDE_DIR.exists(),
+        'include_count': len(list(AMXX_INCLUDE_DIR.glob('*.inc'))) if AMXX_INCLUDE_DIR.exists() else 0,
+        'testsuite_dir': str(AMXX_TESTSUITE_DIR),
+        'testsuite_exists': AMXX_TESTSUITE_DIR.exists(),
+        'testsuite_count': len(list(AMXX_TESTSUITE_DIR.glob('*.sma'))) if AMXX_TESTSUITE_DIR.exists() else 0,
+        'work_dir': str(AMXX_WORK_DIR),
+    }
+
+class WebSearchReq(BaseModel):
+    query: str
+    num_results: int = 8
+
+class WebFetchReq(BaseModel):
+    url: str
+
+@app.post('/api/web/search')
+async def api_web_search(req: WebSearchReq):
+    try:
+        num = max(1, min(req.num_results, 20))
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                'https://html.duckduckgo.com/html/',
+                params={'q': req.query},
+                headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'}
+            )
+        pat = re.compile(
+            r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
+            r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+            re.DOTALL
+        )
+        out: list[dict[str, str]] = []
+        for m in pat.finditer(resp.text):
+            url_h, title_h, snippet_h = m.groups()
+            out.append({
+                'title': html.unescape(re.sub(r'<[^>]+>', '', title_h).strip()),
+                'url': html.unescape(url_h),
+                'snippet': html.unescape(re.sub(r'<[^>]+>', '', snippet_h).strip()),
+            })
+            if len(out) >= num:
+                break
+        return {'ok': True, 'results': out}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
+@app.post('/api/web/fetch')
+async def api_web_fetch(req: WebFetchReq):
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            resp = await client.get(
+                req.url,
+                headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'}
+            )
+        text = resp.text
+        truncated = False
+        if len(text) > 15000:
+            text = text[:15000]
+            truncated = True
+        return {'ok': True, 'status': resp.status_code, 'content': text, 'truncated': truncated}
     except Exception as e:
         return {'ok': False, 'error': str(e)}
 

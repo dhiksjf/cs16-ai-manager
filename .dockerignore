@@ -1,36 +1,43 @@
-# Build artefacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Frontend build artifacts
 frontend/node_modules/
 frontend/dist/
-frontend/.tsbuildinfo
+frontend/.vite/
+frontend/.cache/
 
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-.pytest_cache/
-.venv/
-venv/
-env/
-
-# Secrets / local config
-.env
-.env.local
-cs16-config.local.json
-*.pem
-*.key
-
-# OS / editor
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Git / Replit leftovers (defensive)
-.local/
-.agents/
-.replit
-.replitignore
+# Git
 .git/
 .gitignore
+.gitattributes
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Docs / examples
+*.md
+!frontend/README.md
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Compiler sources — already bundled at build time
+# (we COPY compiler/include/ and compiler/testsuite/, but not the source dir)
+compiler/source/
+
+# Test files
+tests/
+test_*.py
+*_test.py

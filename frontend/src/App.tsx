@@ -186,6 +186,14 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   info: <Eye size={14} />,
   verify: <CheckCircle2 size={14} />,
   ask_user: <HelpCircle size={14} />,
+  read_local: <FileText size={14} />,
+  write_local: <Code2 size={14} />,
+  list_local: <FolderOpen size={14} />,
+  compile_plugin: <Cpu size={14} />,
+  web_search: <Search size={14} />,
+  web_fetch: <Eye size={14} />,
+  download_file: <ChevronRight size={14} />,
+  git_clone: <Database size={14} />,
 };
 
 const DEFAULT_CONFIG: ConnectionConfig = {
@@ -949,6 +957,10 @@ function Dashboard({ config }: { config: ConnectionConfig }) {
   const [editPath, setEditPath] = useState('');
   const [editContent, setEditContent] = useState('');
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [compilerStatus, setCompilerStatus] = useState<{
+    amxxpc: string; amxxpc_exists: boolean;
+    include_count: number; testsuite_count: number;
+  } | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -968,6 +980,23 @@ function Dashboard({ config }: { config: ConnectionConfig }) {
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
     }
   }, [input]);
+
+  // Poll compiler status (every 30s)
+  useEffect(() => {
+    let cancelled = false;
+    const fetchCompiler = async () => {
+      try {
+        const r = await fetch('/api/compiler/status');
+        if (!cancelled && r.ok) {
+          const j = await r.json();
+          if (j.ok) setCompilerStatus(j);
+        }
+      } catch { /* ignore */ }
+    };
+    fetchCompiler();
+    const iv = setInterval(fetchCompiler, 30000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, []);
 
   const handleSend = async () => {
     if (!input.trim() || streaming) return;
@@ -1232,6 +1261,20 @@ function Dashboard({ config }: { config: ConnectionConfig }) {
             style={{ background: '#1B5E20', color: '#fff' }}
           >
             RCON
+          </span>
+        )}
+
+        {compilerStatus && (
+          <span
+            className="text-[9px] font-semibold px-1.5 py-0.5 rounded"
+            title={`amxxpc: ${compilerStatus.amxxpc}${compilerStatus.amxxpc_exists ? ' ✓' : ' ✗'} | SDK: ${compilerStatus.include_count} .inc | testsuite: ${compilerStatus.testsuite_count} plugins`}
+            style={{
+              background: compilerStatus.amxxpc_exists ? '#4A148C' : '#444',
+              color: '#fff',
+            }}
+          >
+            <Cpu size={9} style={{ display: 'inline', marginRight: '3px', verticalAlign: 'middle' }} />
+            amxxpc
           </span>
         )}
 
