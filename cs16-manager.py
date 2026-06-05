@@ -7,7 +7,7 @@ real-time reasoning, planning, action verification, memory, and question-asking 
 
 import asyncio, json, os, socket, stat, sys, traceback, uuid, hashlib, time, re, fnmatch, threading
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any, Optional
 from datetime import datetime
 
 try:
@@ -34,11 +34,11 @@ cfg = {
     'host': '', 'port': 2022, 'user': '', 'password': '',
     'rconPass': '', 'rconHost': '', 'gamePort': 27015
 }
-_transport = None
-_sftp = None
+_transport: Optional[paramiko.Transport] = None
+_sftp: Optional[paramiko.SFTPClient] = None
 _sftp_lock = threading.RLock()  # reentrant — sftp_copy calls sftp_read/write internally
-chat_history = []
-task_memory = []  # Last 5 task contexts for continuity
+chat_history: list[dict[str, Any]] = []
+task_memory: list[dict[str, Any]] = []  # Last 5 task contexts for continuity
 
 # ─── Pydantic Models ───
 
@@ -74,7 +74,7 @@ class AnswerReq(BaseModel):
 
 # ─── Session Management ───
 
-pending_questions = {}  # session_id -> {task, messages, callback}
+pending_questions: dict[str, dict[str, Any]] = {}  # session_id -> {task, messages, callback}
 
 # ─── SFTP Functions ───
 
@@ -98,19 +98,22 @@ def sftp_close():
         except: pass
         _transport = None
 
-def sftp_check():
-    if not _sftp:
+def sftp_check() -> None:
+    """Raise 400 if no SFTP connection is active. Also narrows _sftp for type checkers."""
+    if _sftp is None:
         raise HTTPException(400, 'SFTP not connected')
+    assert _sftp is not None  # noqa: F823 — narrows the module-level optional for pyright/basedpyright
 
 def sftp_ls(path='.'):
     with _sftp_lock:
         sftp_check()
+        assert _sftp is not None
         files = _sftp.listdir_attr(path)
         r = []
         for f in files:
             r.append({
                 'name': f.filename,
-                'dir': stat.S_ISDIR(f.st_mode),
+                'dir': stat.S_ISDIR(f.st_mode or 0),
                 'size': f.st_size,
                 'mtime': getattr(f, 'st_mtime', 0)
             })
@@ -119,18 +122,21 @@ def sftp_ls(path='.'):
 def sftp_read(path_str: str) -> str:
     with _sftp_lock:
         sftp_check()
+        assert _sftp is not None
         with _sftp.open(path_str, 'r') as f:
             return f.read().decode('utf-8', errors='replace')
 
 def sftp_write(path_str: str, content: str):
     with _sftp_lock:
         sftp_check()
+        assert _sftp is not None
         with _sftp.open(path_str, 'w') as f:
             f.write(content.encode('utf-8'))
 
 def sftp_delete(path_str: str):
     with _sftp_lock:
         sftp_check()
+        assert _sftp is not None
         try:
             _sftp.remove(path_str)
         except:
@@ -139,16 +145,19 @@ def sftp_delete(path_str: str):
 def sftp_mkdir(path_str: str):
     with _sftp_lock:
         sftp_check()
+        assert _sftp is not None
         _sftp.mkdir(path_str)
 
 def sftp_move(source: str, destination: str):
     with _sftp_lock:
         sftp_check()
+        assert _sftp is not None
         _sftp.rename(source, destination)
 
 def sftp_copy(source: str, destination: str):
     with _sftp_lock:
         sftp_check()
+        assert _sftp is not None
         with _sftp.open(source, 'r') as f:
             content = f.read()
         with _sftp.open(destination, 'w') as f:
@@ -157,28 +166,32 @@ def sftp_copy(source: str, destination: str):
 def sftp_rename(old_path: str, new_path: str):
     with _sftp_lock:
         sftp_check()
+        assert _sftp is not None
         _sftp.rename(old_path, new_path)
 
 def sftp_chmod(path_str: str, mode: int):
     with _sftp_lock:
         sftp_check()
+        assert _sftp is not None
         _sftp.chmod(path_str, mode)
 
 def sftp_search(root: str, pattern: str, max_results: int = 60, max_depth: int = 3) -> list:
     with _sftp_lock:
         sftp_check()
+        sftp = _sftp
+        assert sftp is not None
         r = []
         deadline = time.time() + 15.0
         def _walk(p, depth=0):
             if depth > max_depth or len(r) >= max_results or time.time() > deadline:
                 return
             try:
-                entries = _sftp.listdir_attr(p)
+                entries = sftp.listdir_attr(p)
                 for f in entries:
                     if len(r) >= max_results or time.time() > deadline:
                         break
                     fp = (p.rstrip('/') + '/' + f.filename) if p != '.' else f.filename
-                    if stat.S_ISDIR(f.st_mode):
+                    if stat.S_ISDIR(f.st_mode or 0):
                         _walk(fp, depth + 1)
                     elif fnmatch.fnmatch(f.filename.lower(), pattern.lower()):
                         r.append({'path': fp, 'size': f.st_size})
@@ -190,6 +203,8 @@ def sftp_search(root: str, pattern: str, max_results: int = 60, max_depth: int =
 def sftp_search_content(root: str, pattern: str, max_files: int = 50) -> list:
     with _sftp_lock:
         sftp_check()
+        sftp = _sftp
+        assert sftp is not None
         r = []
         files_checked = 0
         def _walk(p):
@@ -197,16 +212,16 @@ def sftp_search_content(root: str, pattern: str, max_files: int = 50) -> list:
             if files_checked >= max_files:
                 return
             try:
-                for f in _sftp.listdir_attr(p):
+                for f in sftp.listdir_attr(p):
                     if files_checked >= max_files:
                         return
                     fp = (p + '/' + f.filename) if p != '.' else f.filename
-                    if stat.S_ISDIR(f.st_mode):
+                    if stat.S_ISDIR(f.st_mode or 0):
                         _walk(fp)
-                    elif f.st_size < 1024 * 1024:
+                    elif (f.st_size or 0) < 1024 * 1024:
                         files_checked += 1
                         try:
-                            with _sftp.open(fp, 'r') as fh:
+                            with sftp.open(fp, 'r') as fh:
                                 content = fh.read().decode('utf-8', errors='replace')
                             matches = re.findall(pattern, content, re.IGNORECASE)
                             if matches:
@@ -225,6 +240,7 @@ def sftp_search_content(root: str, pattern: str, max_files: int = 50) -> list:
 
 def sftp_read_batch(paths: list[str]) -> list[dict]:
     sftp_check()
+    assert _sftp is not None
     r = []
     for p in paths:
         try:
@@ -236,6 +252,7 @@ def sftp_read_batch(paths: list[str]) -> list[dict]:
 
 def sftp_exists(path_str: str) -> bool:
     sftp_check()
+    assert _sftp is not None
     try:
         _sftp.stat(path_str)
         return True
@@ -244,13 +261,14 @@ def sftp_exists(path_str: str) -> bool:
 
 def sftp_get_info(path_str: str) -> dict:
     sftp_check()
+    assert _sftp is not None
     try:
         s = _sftp.stat(path_str)
         return {
             'exists': True,
             'size': s.st_size,
-            'is_dir': stat.S_ISDIR(s.st_mode),
-            'permissions': oct(s.st_mode)[-3:],
+            'is_dir': stat.S_ISDIR(s.st_mode or 0),
+            'permissions': oct(s.st_mode or 0)[-3:],
             'mtime': s.st_mtime
         }
     except Exception as e:
@@ -258,6 +276,7 @@ def sftp_get_info(path_str: str) -> dict:
 
 def sftp_append(path_str: str, content: str):
     sftp_check()
+    assert _sftp is not None
     try:
         existing = sftp_read(path_str)
         sftp_write(path_str, existing + content)
@@ -762,7 +781,7 @@ async def agent_stream(req: AgentReq):
 
     try:
         # Build message context
-        messages = [{'role': 'system', 'content': SYSTEM_PROMPT}]
+        messages: list[dict[str, Any]] = [{'role': 'system', 'content': SYSTEM_PROMPT}]
 
         # Add task memory (last 5 tasks for context continuity)
         if task_memory:
@@ -808,6 +827,7 @@ async def agent_stream(req: AgentReq):
         tool_seq = 0
         task_results = []
         current_task_summary = {'task': task, 'steps': []}
+        iteration = 0  # ensure bound for the post-loop check
 
         for iteration in range(max_iter):
             assistant_content = ''
@@ -1280,7 +1300,7 @@ async def agent_stream(req: AgentReq):
 
 app = FastAPI(title='CS 1.6 AI Manager - OMEGA Agent')
 
-app.add_middleware(
+app.add_middleware(  # type: ignore[arg-type]
     CORSMiddleware,
     allow_origins=['*'],
     allow_credentials=True,
@@ -1324,6 +1344,7 @@ async def api_setup_test(req: SetupTestReq):
     r = {'ok': True, 'sftp': False, 'rcon': False, 'rconResponse': ''}
     try:
         sftp_connect(d['host'], d['port'], d['user'], d['password'])
+        assert _sftp is not None
         _sftp.listdir('.')
         r['sftp'] = True
     except Exception as e:
