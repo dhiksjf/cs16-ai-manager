@@ -22,32 +22,59 @@ RUN pnpm build
 
 # ============================================================================
 # Stage 1.5: Download the prebuilt AMX Mod X compiler + SDK from the
-#            official 1.9.0.5303 base Linux tarball. This is a 4 MB download
-#            (vs. a 5+ minute multilib/NASM/AMBuild source compile) and ships:
+#            official base Linux tarball. This is a 4 MB download (vs. a 5+
+#            minute multilib/NASM/AMBuild source compile) and ships:
 #              - amxxpc          (32-bit i386 ELF compiler frontend, ~208 KB)
 #              - amxxpc32.so     (32-bit Pawn compiler library, ~214 KB)
 #              - include/        (66 .inc AMX Mod X SDK headers)
 #              - testsuite/      (28 reference test plugins)
 #            Our repo's compiler/extras/ (74 third-party .inc files like
 #            reapi.inc, shop.inc, skills.inc, etc.) is overlaid on top.
+#
+#            URL NOTE: the release tag (1.9.0.5303) and the asset filename's
+#            product version (1.9.0-git5303) use DIFFERENT formats — the
+#            "git" suffix in the filename is NOT a typo. To avoid hardcoding
+#            the brittle version/filename pair, we look the URL up from the
+#            GitHub Releases API and fall back to a pinned version if the
+#            API is rate-limited or unavailable.
 # ============================================================================
 FROM debian:bookworm-slim AS amxx-extract
 
-ARG AMXX_VERSION=1.9.0.5303
-ARG AMXX_TARBALL_URL=https://github.com/alliedmodders/amxmodx/releases/download/${AMXX_VERSION}/amxmodx-${AMXX_VERSION}-base-linux.tar.gz
+# Pinned fallback if the GitHub API call fails (rate limit / outage).
+# Release tag: 1.9.0.5303  ->  Product version: 1.9.0-git5303
+ARG AMXX_FALLBACK_URL=https://github.com/alliedmodders/amxmodx/releases/download/1.9.0.5303/amxmodx-1.9.0-git5303-base-linux.tar.gz
 
 # curl is needed to download the tarball. ca-certificates for HTTPS.
+# jq is used to parse the GitHub API JSON response.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        jq \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp/amxx
 
-# Download the base tarball. This is a 4 MB file and takes < 10 seconds.
-RUN curl -fsSL --retry 3 -o /tmp/amxx/base.tar.gz "${AMXX_TARBALL_URL}" && \
-    ls -la /tmp/amxx/base.tar.gz
+# Download the latest base-linux tarball. Uses the GitHub API to find the
+# current asset URL (so a new amxmodx release is picked up automatically).
+# Falls back to AMXX_FALLBACK_URL if the API call fails for any reason.
+RUN set -eux; \
+    AMXX_URL=$(curl -fsSL --max-time 20 \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'User-Agent: cs16-ai-manager-docker' \
+        https://api.github.com/repos/alliedmodders/amxmodx/releases/latest \
+        | jq -r '.assets[] | select(.name | endswith("base-linux.tar.gz")) | .browser_download_url' \
+        | head -n1); \
+    if [ -z "$AMXX_URL" ] || [ "$AMXX_URL" = "null" ]; then \
+        echo "WARN: GitHub API lookup failed, using pinned fallback URL"; \
+        AMXX_URL="${AMXX_FALLBACK_URL}"; \
+    fi; \
+    echo "Downloading AMX Mod X from: $AMXX_URL"; \
+    curl -fsSL --retry 3 --max-time 120 \
+        -o /tmp/amxx/base.tar.gz "$AMXX_URL"; \
+    ls -la /tmp/amxx/base.tar.gz; \
+    echo "Verifying tarball contents..."; \
+    tar -tzf /tmp/amxx/base.tar.gz | grep -E '(amxxpc$|amxxpc32\.so$|include/|testsuite/)' | head -5
 
 # Extract only the compiler + SDK + testsuite (skip the runtime MOD).
 # --strip-components=3 removes "addons/amxmodx/scripting/" from the file paths.
