@@ -788,6 +788,102 @@ PAWN / AMX MOD X SYNTAX QUICK REFERENCE:
   - For non-stock plugins you may need specific includes (e.g. <cstrike> for CS natives,
     <fakemeta> for FM_*, <hamsandwich> for RegisterHam, <reapi> for ReGameDll API)
 
+COMMON AMX MOD X API (use these signatures directly — do NOT spend iterations
+searching the .inc files for them; only read_local an .inc if you need a
+niche/uncommon function or its exact constant values):
+
+  CLIENT OUTPUT:
+    client_print(id, type, const msg[], any:...)  // types: print_chat, print_console, print_center
+    client_print(0, print_chat, "global chat msg")  // id=0 broadcasts to all
+    set_hudmessage(r, g, b, x, y, effects, fadein, fadeout, holdtime, fx=0, ...)
+    show_hudmessage(id, const msg[], any:...)
+    show_motd(id, const file[], const header[]="")
+    ColorMessage(id, _index, const msg[], any:...)  // from colorchat.inc
+    ColorSelection(...)                              // for menu choices
+
+  PLAYER QUERIES:
+    is_user_connected(id)  is_user_alive(id)  is_user_bot(id)  is_user_hltv(id)
+    get_user_name(id, name[], len)   get_user_authid(id, auth[], len)
+    get_user_userid(id)  get_user_team(id)  get_user_health(id)  get_user_armor(id)
+    get_user_weapon(id)  get_user_origin(id, origin[3], lorigin=0)
+    get_user_maxspeed(id)  get_user_flags(id)  get_user_aiming(id)  get_user_no_retry()
+    get_user_msglevel(id)  get_user_time(id)  get_user_frametime(id)
+
+  PLAYER ACTIONS:
+    set_user_health(id, hp)  set_user_armor(id, arm)  set_user_team(id, team)
+    set_user_godmode(id, 1)  set_user_noclip(id, 1)   set_user_gravity(id, Float:grav)
+    set_user_maxspeed(id, Float:speed)  set_user_origin(id, origin[3])
+    user_slap(id, dmg, dmgtype=0)  user_kill(id)  drop_weapons(id, dropwhat=0)
+    give_item(id, const item[])  cs_set_user_money(id, money, flash=0)  // from cstrike
+    cs_set_user_bpammo(id, weapon, ammount)  cs_set_user_plant(id, 1)    // from cstrike
+
+  ADMIN:
+    cmd_access(id, level, flags=0, needhost=0)  // returns 1 if allowed
+    get_user_flags(id)  set_user_flags(id, flags)
+    access(id, level)  // simpler, no flag check
+
+  CVARS:
+    register_cvar("name", "default", flags=0, description[]="")
+    get_cvar_pointer("name")  // returns cvar handle (0 if missing)
+    get_pcvar_num(handle)  get_pcvar_string(handle, buf[], len)  get_pcvar_float(handle)
+    set_pcvar_num(handle, val)  set_pcvar_string(handle, val)  set_pcvar_float(handle, Float:val)
+
+  TASKS / TIMERS:
+    set_task(Float:time, const task[], id=0, parameter="", len=0, flags=0)
+    remove_task(id=0, const task[]="")  // either id OR task name
+    change_task(id, task[], Float:new_time, param_change=0)
+
+  EVENTS (use register_event with these names):
+    "DeathMsg"  (kills)              "TextMsg"   (server text)
+    "CurWeapon" (weapon switch)      "ResetHUD"  (round reset / spawn)
+    "HLTV"      (round start)        "SayText"   (chat)
+    "TeamInfo"  (team change)        "SetFOV"    (zoom)
+    "SpecHealth"                      "Money"     (CS money)
+    "BarTime"   (progress bars)      "StatusValue" (HUD icons)
+
+  FORWARDS (use these as public function names — AMXX calls them automatically):
+    plugin_init()  plugin_cfg()  plugin_precache()  plugin_end()  plugin_pause()  plugin_unpause()
+    client_connect(id)  client_connectex(id, const name[], const ip[], reason[128])
+    client_putinserver(id)  client_authorized(id, const authid[])
+    client_disconnect(id)  client_disconnected(id, bool:drop, message[], maxlen)
+    client_command(id)  client_infochanged(id)
+    server_changelevel(const map[])
+
+  MESSAGES (low-level — for custom effects/sounds):
+    message_begin(MSG_ONE, gmsgSayText, _, id)  message_end()  // chat
+    message_begin(MSG_ALL, gmsgDeathMsg, ...)                // death notice
+    Full list of gmsg* in messages_const.inc / get_user_msgid("SayText")
+
+TEMPLATES (these are 100% correct; copy and adapt):
+
+  Welcome plugin (chat + HUD on join):
+    #include <amxmodx>
+    public plugin_init() { register_plugin("Welcome", "1.0", "OMEGA") }
+    public client_putinserver(id) {
+      new name[32]; get_user_name(id, name, charsmax(name))
+      client_print(id, print_chat, "Welcome to the server, %s!", name)
+      set_hudmessage(0, 255, 0, -1.0, 0.30, 0, 6.0, 5.0, 0.1, 0.2)
+      show_hudmessage(id, "Have fun and play fair!")
+    }
+
+  DeathMsg logger:
+    #include <amxmodx>
+    public plugin_init() { register_plugin("DeathLog", "1.0", "OMEGA")
+      register_event("DeathMsg", "hook_death", "a") }
+    public hook_death() {
+      new victim = read_data(2); new killer = read_data(1)
+      new vn[32], kn[32]
+      get_user_name(victim, vn, charsmax(vn))
+      get_user_name(killer, kn, charsmax(kn))
+      client_print(0, print_chat, "* %s killed %s", kn, vn)
+    }
+
+  Say command (e.g. /hello):
+    #include <amxmodx>
+    public plugin_init() { register_plugin("Hello", "1.0", "OMEGA")
+      register_clcmd("say /hello", "cmd_hello") }
+    public cmd_hello(id) { client_print(id, print_chat, "Hello!") }
+
 STANDARD PLUGIN CREATION WORKFLOW:
   1. PLAN: State the plugin's behavior and which natives/modules it needs.
   2. RESEARCH: If you're unsure about a native, read the .inc file:
@@ -1065,7 +1161,7 @@ async def agent_stream(req: AgentReq):
             headers['HTTP-Referer'] = 'https://cs16-manager.replit.app'
             headers['X-Title'] = 'CS 1.6 AI Manager'
 
-        max_iter = 20
+        max_iter = 30
         reasoning_text = ''
         tool_seq = 0
         task_results = []
