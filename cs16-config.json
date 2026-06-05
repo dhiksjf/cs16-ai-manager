@@ -1,0 +1,9 @@
+{
+  "host": "",
+  "port": 2022,
+  "user": "",
+  "password": "",
+  "rconPass": "",
+  "rconHost": "",
+  "gamePort": 27015
+}

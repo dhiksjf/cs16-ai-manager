@@ -1,0 +1,32 @@
+# Build artefacts
+frontend/node_modules/
+frontend/dist/
+frontend/.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets / local config — do NOT commit real SFTP/RCON creds
+.env
+.env.local
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Leftover Replit internals
+.local/
+.agents/
+.replit
+.replitignore

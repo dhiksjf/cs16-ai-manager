@@ -1,0 +1,36 @@
+# Build artefacts
+frontend/node_modules/
+frontend/dist/
+frontend/.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Secrets / local config
+.env
+.env.local
+cs16-config.local.json
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git / Replit leftovers (defensive)
+.local/
+.agents/
+.replit
+.replitignore
+.git/
+.gitignore
