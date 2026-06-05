@@ -57,7 +57,7 @@ git push -u origin main
 7. **Health check path:** `/api/healthz`
 8. **Deploy.**
 
-First build takes 4–7 minutes (downloading base images + building frontend + installing Python deps + **building the AMX Mod X compiler from source**). Subsequent builds use Docker layer cache — only the frontend and Python stages rebuild, the compiler is cached.
+First build takes 2–4 minutes (downloading base images + building frontend + installing Python deps + **downloading the 4 MB prebuilt AMX Mod X compiler**). The compiler is a 32-bit ELF pulled from the official `alliedmodders/amxmodx` GitHub release — no source compilation needed. Subsequent builds use Docker layer cache — the compiler + frontend are cached, only the Python stage rebuilds.
 
 ### 3. Set environment variables
 
@@ -74,7 +74,7 @@ In the Koyeb service → **Environment variables**, add any of these (all option
 | `CS16_RCON_HOST` | CS 1.6 game server IP | — |
 | `CS16_RCON_PASSWORD` | RCON password (`rcon_password` cvar) | — |
 | `CS16_GAME_PORT` | CS 1.6 game port (UDP) | `27015` |
-| `AMXXPC_BIN` | Path to the amxxpc compiler binary | `/usr/local/bin/amxxpc` |
+| `AMXXPC_BIN` | Path to the amxxpc compiler binary | `/usr/local/lib/amxx/amxxpc` |
 | `AMXX_INCLUDE_DIR` | Path to the .inc SDK headers | `/app/amxx/include` |
 | `AMXX_TESTSUITE_DIR` | Path to the reference test plugins | `/app/amxx/testsuite` |
 | `AMXX_WORK_DIR` | Where the agent writes .sma sources | `/tmp/amxx_work` |
@@ -183,9 +183,10 @@ python cs16-manager.py   # http://localhost:8000  (serves UI + API)
 └─────────────────────────────────────────────────────────┘
 
 Docker image contents:
-  /usr/local/bin/amxxpc            ← built from alliedmodders/amxmodx
-  /app/amxx/include/*.inc          ← AMX Mod X SDK (140 headers)
-  /app/amxx/testsuite/*.sma        ← reference plugins (25 sources)
+  /usr/local/lib/amxx/amxxpc       ← prebuilt 32-bit ELF compiler (from upstream release)
+  /usr/local/lib/amxx/amxxpc32.so  ← 32-bit Pawn library
+  /app/amxx/include/*.inc          ← AMX Mod X SDK (66 headers from upstream + 74 third-party extras)
+  /app/amxx/testsuite/*.sma        ← reference plugins (28 sources from upstream)
   /app/static/                     ← built React UI
   /app/cs16-manager.py             ← FastAPI backend
 ```

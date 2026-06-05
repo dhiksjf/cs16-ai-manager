@@ -33,8 +33,8 @@ Thumbs.db
 *.bak
 *.swp
 
-# Compiler sources — already bundled at build time
-# (we COPY compiler/include/ and compiler/testsuite/, but not the source dir)
+# Compiler sources — bundled at build time from the upstream amxmodx
+# release tarball, not from any local source dir
 compiler/source/
 
 # Test files
