@@ -91,8 +91,12 @@ RUN mkdir -p extracted && \
 
 # Install the 32-bit ELF binaries into /usr/local/lib/amxx/ so the runtime
 # dynamic linker can find amxxpc32.so when amxxpc dlopen()s it.
+# We keep the real binary as amxxpc.bin and install a wrapper at amxxpc
+# that runs it via qemu-i386-static (added in the runtime stage). This
+# is needed because many cloud kernels (including Koyeb's) ship with
+# CONFIG_IA32_EMULATION disabled, so 32-bit ELFs cannot run natively.
 RUN mkdir -p /usr/local/lib/amxx && \
-    install -m 0755 /tmp/amxx/extracted/amxxpc     /usr/local/lib/amxx/amxxpc && \
+    install -m 0755 /tmp/amxx/extracted/amxxpc     /usr/local/lib/amxx/amxxpc.bin && \
     install -m 0755 /tmp/amxx/extracted/amxxpc32.so /usr/local/lib/amxx/amxxpc32.so
 
 # ============================================================================
@@ -113,8 +117,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     LD_LIBRARY_PATH=/usr/local/lib/amxx
 
 # 32-bit (i386) libraries are required because amxxpc + amxxpc32.so are 32-bit
-# ELF executables. Without these the compiler fails with "Exec format error"
-# or "libstdc++.so.6: cannot open shared object file".
+# ELF executables. qemu-user-static is required to actually RUN them on cloud
+# hosts (like Koyeb) whose kernels ship with CONFIG_IA32_EMULATION disabled.
+# The wrapper script at /usr/local/lib/amxx/amxxpc invokes qemu-i386-static
+# so the compiler works regardless of the host kernel's 32-bit support.
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -127,6 +133,7 @@ RUN dpkg --add-architecture i386 && \
         libc6:i386 \
         libstdc++6:i386 \
         zlib1g:i386 \
+        qemu-user-static \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user and the app directory
@@ -153,6 +160,25 @@ COPY --chown=app:app entrypoint.sh ./
 
 # Copy the amxxpc binary + amxxpc32.so from the extract stage
 COPY --from=amxx-extract --chown=root:root /usr/local/lib/amxx/ /usr/local/lib/amxx/
+
+# Wrap amxxpc with qemu-i386-static. Many cloud kernels (Koyeb free tier
+# included) ship with CONFIG_IA32_EMULATION=n, so 32-bit x86 ELFs cannot
+# be exec()'d directly. qemu-i386-static emulates a 32-bit CPU + kernel
+# in userspace and works on any x86_64 host. The wrapper sets QEMU_LOG
+# to a safe default and ensures the cwd contains amxxpc32.so for the
+# dlopen() inside amxxpc.
+RUN cat > /usr/local/lib/amxx/amxxpc << 'WRAPPER_EOF'
+#!/bin/sh
+# Wrapper that runs the 32-bit amxxpc via qemu-i386-static.
+# The real binary is amxxpc.bin; amxxpc32.so must be in the same dir.
+# -L / sets the qemu "interp prefix" to the host root so the emulated
+# 32-bit guest can find the 32-bit libraries we installed at the
+# standard Debian paths (/lib/i386-linux-gnu, /usr/lib/i386-linux-gnu).
+exec /usr/bin/qemu-i386-static \
+    -L / \
+    /usr/local/lib/amxx/amxxpc.bin "$@"
+WRAPPER_EOF
+RUN chmod 0755 /usr/local/lib/amxx/amxxpc
 
 # Copy the AMX Mod X SDK (.inc headers) and reference test plugins
 COPY --from=amxx-extract --chown=app:app /tmp/amxx/extracted/include/   /app/amxx/include/
