@@ -164,21 +164,10 @@ COPY --from=amxx-extract --chown=root:root /usr/local/lib/amxx/ /usr/local/lib/a
 # Wrap amxxpc with qemu-i386-static. Many cloud kernels (Koyeb free tier
 # included) ship with CONFIG_IA32_EMULATION=n, so 32-bit x86 ELFs cannot
 # be exec()'d directly. qemu-i386-static emulates a 32-bit CPU + kernel
-# in userspace and works on any x86_64 host. The wrapper sets QEMU_LOG
-# to a safe default and ensures the cwd contains amxxpc32.so for the
-# dlopen() inside amxxpc.
-RUN cat > /usr/local/lib/amxx/amxxpc << 'WRAPPER_EOF'
-#!/bin/sh
-# Wrapper that runs the 32-bit amxxpc via qemu-i386-static.
-# The real binary is amxxpc.bin; amxxpc32.so must be in the same dir.
-# -L / sets the qemu "interp prefix" to the host root so the emulated
-# 32-bit guest can find the 32-bit libraries we installed at the
-# standard Debian paths (/lib/i386-linux-gnu, /usr/lib/i386-linux-gnu).
-exec /usr/bin/qemu-i386-static \
-    -L / \
-    /usr/local/lib/amxx/amxxpc.bin "$@"
-WRAPPER_EOF
-RUN chmod 0755 /usr/local/lib/amxx/amxxpc
+# in userspace and works on any x86_64 host. The wrapper is checked in
+# to compiler/amxxpc-wrapper.sh — Dockerfile heredocs inside RUN break
+# the parser, so we COPY the file in instead.
+COPY --chown=root:root --chmod=0755 compiler/amxxpc-wrapper.sh /usr/local/lib/amxx/amxxpc
 
 # Copy the AMX Mod X SDK (.inc headers) and reference test plugins
 COPY --from=amxx-extract --chown=app:app /tmp/amxx/extracted/include/   /app/amxx/include/
