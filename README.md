@@ -19,7 +19,7 @@ A web app that lets you **manage a Counter-Strike 1.6 dedicated server through a
 - Questions: OMEGA only asks when it literally cannot proceed without your input
 
 ### Plugin development
-- **In-container AMX Mod X compiler** (`amxxpc`) — built from source in the Docker image
+- **In-container AMX Mod X compiler** (`amxxpc`) — prebuilt 32-bit ELF from the official `alliedmodders/amxmodx` release, wrapped in `qemu-i386-static` so it runs on any x86_64 host (including Koyeb's IA32-emulation-free kernel)
 - **Bundled SDK** — 140 `.inc` API headers at `/app/amxx/include/` (amxmodx, fakemeta, hamsandwich, cstrike, reapi, …)
 - **Testsuite** — 25 reference plugins at `/app/amxx/testsuite/` the agent reads for patterns
 - **Compile + upload** in one call — the agent writes the `.sma`, compiles, uploads the `.amxx` to the server, edits `plugins.ini`, and reloads via RCON
@@ -57,7 +57,7 @@ git push -u origin main
 7. **Health check path:** `/api/healthz`
 8. **Deploy.**
 
-First build takes 2–4 minutes (downloading base images + building frontend + installing Python deps + **downloading the 4 MB prebuilt AMX Mod X compiler**). The compiler is a 32-bit ELF pulled from the official `alliedmodders/amxmodx` GitHub release — no source compilation needed. Subsequent builds use Docker layer cache — the compiler + frontend are cached, only the Python stage rebuilds.
+First build takes 2–4 minutes (downloading base images + building frontend + installing Python deps + **downloading the 4 MB prebuilt AMX Mod X compiler** + **installing `qemu-user-static`**). The compiler is a 32-bit ELF pulled from the official `alliedmodders/amxmodx` GitHub release. A tiny shell wrapper invokes it through `qemu-i386-static` so it works on any x86_64 host — Koyeb's free-tier kernel ships with `CONFIG_IA32_EMULATION=n`, so 32-bit ELFs cannot run natively there. Subsequent builds use Docker layer cache — the compiler + frontend are cached, only the Python stage rebuilds.
 
 ### 3. Set environment variables
 
@@ -109,9 +109,11 @@ cd frontend && pnpm install && pnpm build && cd ..
 python cs16-manager.py   # http://localhost:8000  (serves UI + API)
 ```
 
-**Note:** the `compile_plugin`, `read_local`, `write_local`, `list_local` tools require `amxxpc` at `/usr/local/bin/amxxpc` and the SDK at `/app/amxx/include/`. For local development outside Docker, you'll need to:
+**Note:** the `compile_plugin`, `read_local`, `write_local`, `list_local` tools require `amxxpc` at `/usr/local/lib/amxx/amxxpc` and the SDK at `/app/amxx/include/`. For local development outside Docker, you'll need to:
 1. Build/install `amxxpc` for your platform
 2. Copy `compiler/include/*.inc` to `/app/amxx/include/` (or set `AMXX_INCLUDE_DIR`)
+
+On a 64-bit Linux host without 32-bit kernel support (e.g. some cloud VMs), wrap the binary in `qemu-i386-static` — see `Dockerfile` for an example.
 
 ---
 
@@ -183,8 +185,10 @@ python cs16-manager.py   # http://localhost:8000  (serves UI + API)
 └─────────────────────────────────────────────────────────┘
 
 Docker image contents:
-  /usr/local/lib/amxx/amxxpc       ← prebuilt 32-bit ELF compiler (from upstream release)
-  /usr/local/lib/amxx/amxxpc32.so  ← 32-bit Pawn library
+  /usr/local/lib/amxx/amxxpc       ← shell wrapper → qemu-i386-static → amxxpc.bin
+  /usr/local/lib/amxx/amxxpc.bin   ← real 32-bit ELF compiler (from upstream release)
+  /usr/local/lib/amxx/amxxpc32.so  ← 32-bit Pawn library (dlopen'd by amxxpc)
+  /usr/bin/qemu-i386-static        ← 32-bit x86 userspace emulator (apt)
   /app/amxx/include/*.inc          ← AMX Mod X SDK (66 headers from upstream + 74 third-party extras)
   /app/amxx/testsuite/*.sma        ← reference plugins (28 sources from upstream)
   /app/static/                     ← built React UI

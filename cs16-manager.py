@@ -29,12 +29,49 @@ HTML_FILE = STATIC_DIR / 'index.html'
 DEFAULT_PORT = 8000
 
 # ─── AMX Mod X Compiler Paths ───
-# These are populated by the Docker image. The compiler is built from source
-# in the Dockerfile (alliedmodders/amxmodx) and the .inc files are bundled.
-AMXXPC_BIN = Path(os.environ.get('AMXXPC_BIN', '/usr/local/bin/amxxpc'))
+# These are populated by the Docker image. The compiler is a 32-bit ELF
+# pulled from the official alliedmodders/amxmodx release and wrapped in a
+# qemu-i386-static shell script so it works on x86_64 hosts whose kernel
+# has CONFIG_IA32_EMULATION disabled (e.g. Koyeb free tier).
+AMXXPC_BIN = Path(os.environ.get('AMXXPC_BIN', '/usr/local/lib/amxx/amxxpc'))
 AMXX_INCLUDE_DIR = Path(os.environ.get('AMXX_INCLUDE_DIR', '/app/amxx/include'))
 AMXX_TESTSUITE_DIR = Path(os.environ.get('AMXX_TESTSUITE_DIR', '/app/amxx/testsuite'))
 AMXX_WORK_DIR = Path(os.environ.get('AMXX_WORK_DIR', '/tmp/amxx_work'))
+
+# Cache for /api/compiler/status — avoid spawning qemu on every 30s poll.
+_compiler_invocable_cache: dict | None = None
+
+def _check_amxxpc_runs(bin_path: Path) -> dict:
+    """Run amxxpc with no args and report whether it actually executed.
+
+    Returns {'runs': bool, 'detail': str}. A 'runs' result means the wrapper
+    reached the real 32-bit binary, loaded the 32-bit libs, and printed the
+    expected usage line — i.e. the compile_plugin tool will work end-to-end.
+    """
+    if not bin_path.exists():
+        return {'runs': False, 'detail': f'{bin_path} not found'}
+    try:
+        proc = subprocess.run(
+            [str(bin_path)],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(bin_path.parent),
+        )
+        combined = (proc.stdout or '') + (proc.stderr or '')
+        lower = combined.lower()
+        if 'exec format error' in lower:
+            return {'runs': False, 'detail': 'kernel rejected 32-bit ELF (CONFIG_IA32_EMULATION=n?)'}
+        if 'no such file' in lower or 'cannot open shared object' in lower:
+            return {'runs': False, 'detail': f'missing 32-bit library: {combined.strip()[:200]}'}
+        if proc.returncode != 0 and not combined.strip():
+            return {'runs': False, 'detail': f'exit code {proc.returncode} with no output'}
+        first_line = combined.strip().splitlines()[0] if combined.strip() else '(no output)'
+        return {'runs': True, 'detail': first_line[:120]}
+    except subprocess.TimeoutExpired:
+        return {'runs': False, 'detail': 'invocation timed out (qemu may be hanging)'}
+    except FileNotFoundError as e:
+        return {'runs': False, 'detail': f'wrapper not executable: {e}'}
+    except Exception as e:
+        return {'runs': False, 'detail': f'{type(e).__name__}: {e}'}
 
 # ─── Configuration ───
 
@@ -1853,10 +1890,21 @@ async def api_rcon(req: RCONReq):
 
 @app.get('/api/compiler/status')
 async def api_compiler_status():
+    # Cached "does amxxpc actually run?" check. The compiler is wrapped in
+    # qemu-i386-static and we don't want to spawn qemu on every 30s poll,
+    # so cache the result for 5 minutes (or until the binary changes).
+    invocable: Optional[dict] = _compiler_invocable_cache
+    if invocable is None or invocable.get('checked_at', 0) < time.time() - 300:
+        invocable = _check_amxxpc_runs(AMXXPC_BIN)
+        invocable['checked_at'] = time.time()
+        globals()['_compiler_invocable_cache'] = invocable
+    assert invocable is not None  # narrowed by the branch above
     return {
         'ok': True,
         'amxxpc': str(AMXXPC_BIN),
         'amxxpc_exists': AMXXPC_BIN.exists(),
+        'amxxpc_runs': invocable.get('runs', False),
+        'amxxpc_runs_detail': invocable.get('detail', ''),
         'include_dir': str(AMXX_INCLUDE_DIR),
         'include_exists': AMXX_INCLUDE_DIR.exists(),
         'include_count': len(list(AMXX_INCLUDE_DIR.glob('*.inc'))) if AMXX_INCLUDE_DIR.exists() else 0,
