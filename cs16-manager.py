@@ -1098,6 +1098,12 @@ def _msgs_to_anthropic(oai_messages: list) -> tuple[str, list]:
                     out.append({'role': 'user', 'content': content})
     return '\n\n'.join(system_parts), out
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# FORCE FIX: MAXIMUM ITERATION LIMIT — SET TO VIRTUALLY UNLIMITED (999,999)
+# Previously: max_iter = 30 (caused "Maximum iterations reached" errors)
+# ═══════════════════════════════════════════════════════════════════════════════
+MAX_ITER = int(os.environ.get('CS16_MAX_ITER', '999999'))
+
 # ─── Main Agent Stream ───
 
 async def agent_stream(req: AgentReq):
@@ -1161,7 +1167,10 @@ async def agent_stream(req: AgentReq):
             headers['HTTP-Referer'] = 'https://cs16-manager.replit.app'
             headers['X-Title'] = 'CS 1.6 AI Manager'
 
-        max_iter = 30
+        # ═══════════════════════════════════════════════════════════════════════
+        # FORCE FIX: Use the global MAX_ITER (999,999) instead of hardcoded 30
+        # ═══════════════════════════════════════════════════════════════════════
+        max_iter = MAX_ITER
         reasoning_text = ''
         tool_seq = 0
         task_results = []
@@ -1786,9 +1795,13 @@ async def agent_stream(req: AgentReq):
                 messages.append(asm)
                 messages.extend(tool_msgs)
 
+        # ═══════════════════════════════════════════════════════════════════════
+        # FORCE FIX: With max_iter=999,999 this is effectively unreachable.
+        # Kept as safety net with a more informative message.
+        # ═══════════════════════════════════════════════════════════════════════
         if iteration >= max_iter - 1:
             _done_sent = True
-            yield sse('done', explanation='Maximum iterations reached. Task may be incomplete.')
+            yield sse('done', explanation=f'Hard iteration limit ({max_iter}) reached — this should not happen. Please report this issue.')
 
     except asyncio.CancelledError:
         pass  # client disconnected — stream closed cleanly
@@ -2008,6 +2021,7 @@ async def api_compiler_status():
         'testsuite_exists': AMXX_TESTSUITE_DIR.exists(),
         'testsuite_count': len(list(AMXX_TESTSUITE_DIR.glob('*.sma'))) if AMXX_TESTSUITE_DIR.exists() else 0,
         'work_dir': str(AMXX_WORK_DIR),
+        'max_iter': MAX_ITER,
     }
 
 class WebSearchReq(BaseModel):
@@ -2085,4 +2099,5 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', DEFAULT_PORT))
     print(f'CS 1.6 AI Manager (OMEGA Agent) listening on 0.0.0.0:{port}')
     print(f'Static dir: {STATIC_DIR} ({"ok" if STATIC_DIR.exists() else "NOT FOUND — UI will not load"})')
+    print(f'Max iterations: {MAX_ITER} (unlimited mode)')
     uvicorn.run(app, host='0.0.0.0', port=port, log_level='info')
