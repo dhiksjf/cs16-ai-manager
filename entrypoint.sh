@@ -39,23 +39,28 @@ PY
 
 # 2.5) Sanity-check the AMX Mod X compiler (amxxpc via qemu-i386-static).
 #      Runs the wrapper with no args — should print usage to stderr and exit
-#      cleanly. Any "Exec format error" / "missing library" / "cannot open
-#      shared object" message here means the compiler won't work at runtime.
+#      cleanly. Wrapped in `timeout 5` so a hanging qemu never blocks the
+#      container's health check. The detailed check still happens on demand
+#      via /api/compiler/status (cached for 5 min).
 if [ -x "${AMXXPC_BIN:-/usr/local/lib/amxx/amxxpc}" ]; then
-    amxxpc_out=$( "${AMXXPC_BIN:-/usr/local/lib/amxx/amxxpc}" 2>&1 || true )
-    case "$amxxpc_out" in
-        *"Exec format error"*)
-            echo "ERROR: amxxpc wrapper failed: kernel cannot run 32-bit ELF even via qemu." >&2
-            echo "       $amxxpc_out" >&2
-            ;;
-        *"No such file"*|*"cannot open"*)
-            echo "ERROR: amxxpc wrapper failed to find amxxpc.bin or a required library." >&2
-            echo "       $amxxpc_out" >&2
-            ;;
-        *)
-            echo "amxxpc      : OK ($(echo "$amxxpc_out" | head -1 | cut -c1-80))"
-            ;;
-    esac
+    amxxpc_out=$( timeout 5 "${AMXXPC_BIN:-/usr/local/lib/amxx/amxxpc}" 2>&1 || true )
+    if [ -z "$amxxpc_out" ]; then
+        echo "WARNING: amxxpc produced no output within 5s (qemu may have hung)"
+    else
+        case "$amxxpc_out" in
+            *"Exec format error"*)
+                echo "ERROR: amxxpc wrapper failed: kernel cannot run 32-bit ELF even via qemu." >&2
+                echo "       $amxxpc_out" >&2
+                ;;
+            *"No such file"*|*"cannot open"*)
+                echo "ERROR: amxxpc wrapper failed to find amxxpc.bin or a required library." >&2
+                echo "       $amxxpc_out" >&2
+                ;;
+            *)
+                echo "amxxpc      : OK ($(echo "$amxxpc_out" | head -1 | cut -c1-80))"
+                ;;
+        esac
+    fi
 else
     echo "WARNING: amxxpc not found at ${AMXXPC_BIN:-/usr/local/lib/amxx/amxxpc} (compile_plugin will fail)"
 fi
