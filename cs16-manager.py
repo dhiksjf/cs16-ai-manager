@@ -1605,11 +1605,11 @@ async def agent_stream(req: AgentReq):
                             try:
                                 proc_result = subprocess.run(
                                     [str(AMXXPC_BIN), include_arg, str(sma_path)],
-                                    capture_output=True, text=True, timeout=30,
+                                    capture_output=True, text=True, timeout=120,
                                     cwd=str(sma_path.parent)
                                 )
                             except subprocess.TimeoutExpired:
-                                err_text = "Compilation timed out after 30s"
+                                err_text = "Compilation timed out after 120s — the compiler is running under qemu emulation which is slower. Try simplifying the plugin or splitting it into smaller files."
                                 proc_result = None
 
                             if proc_result is not None:
