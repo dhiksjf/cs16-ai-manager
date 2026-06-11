@@ -225,8 +225,21 @@ function Icosahedron() {
 
 // ─── Setup Screen ───
 
+const REMEMBER_KEY = 'cs16_remember_config';
+
 function SetupScreen({ onConnect }: { onConnect: (config: ConnectionConfig) => void }) {
-  const [config, setConfig] = useState<ConnectionConfig>(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<ConnectionConfig>(() => {
+    try {
+      const saved = localStorage.getItem(REMEMBER_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Ensure all fields exist (merge with defaults for new fields)
+        return { ...DEFAULT_CONFIG, ...parsed };
+      }
+    } catch {}
+    return DEFAULT_CONFIG;
+  });
+  const [remember, setRemember] = useState(() => !!localStorage.getItem(REMEMBER_KEY));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -272,6 +285,12 @@ function SetupScreen({ onConnect }: { onConnect: (config: ConnectionConfig) => v
         rconHost: config.rconHost,
         gamePort: config.gamePort,
       });
+
+      if (remember) {
+        localStorage.setItem(REMEMBER_KEY, JSON.stringify(config));
+      } else {
+        localStorage.removeItem(REMEMBER_KEY);
+      }
 
       onConnect(config);
     } catch (e: any) {
@@ -481,6 +500,30 @@ function SetupScreen({ onConnect }: { onConnect: (config: ConnectionConfig) => v
               />
             </div>
           </div>
+
+          {/* Remember Me */}
+          <label
+            className="flex items-center gap-2 cursor-pointer select-none py-0.5"
+            style={{ color: '#888' }}
+          >
+            <div
+              onClick={() => setRemember(!remember)}
+              className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center transition-colors"
+              style={{
+                background: remember ? '#7C6CF0' : 'transparent',
+                border: remember ? 'none' : '1px solid #444',
+                cursor: 'pointer',
+              }}
+            >
+              {remember && <Check size={10} color="#fff" />}
+            </div>
+            <span
+              className="text-[11px]"
+              style={{ color: remember ? '#E0E0E0' : '#666' }}
+            >
+              Remember me — save all fields (including API key) for next time
+            </span>
+          </label>
 
           <button
             onClick={handleConnect}
