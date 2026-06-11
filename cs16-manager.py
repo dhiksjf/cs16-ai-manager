@@ -1863,6 +1863,37 @@ async def agent_stream(req: AgentReq):
                 messages.append(asm)
                 messages.extend(tool_msgs)
 
+            # ══════════════════════════════════════════════════════════════════
+            # MEMORY MANAGEMENT: prevent OOM by compressing old tool results
+            # Keep the first message (system prompt), the last 10 messages
+            # (recent context), and compress tool content in everything else
+            # to a short summary (200 chars max).
+            # ══════════════════════════════════════════════════════════════════
+            if len(messages) > 30:
+                # Keep: system (index 0) + last 10 messages as-is
+                keep_head = 1  # system prompt
+                keep_tail = 10
+                head = messages[:keep_head]
+                tail = messages[-keep_tail:]
+                middle = messages[keep_head:-keep_tail]
+                for m in middle:
+                    if m.get('role') == 'tool' and m.get('content'):
+                        c = m['content']
+                        if len(c) > 200:
+                            m['content'] = c[:200] + f' ... ({len(c)} total chars, compressed)'
+                    if m.get('role') == 'assistant' and m.get('content'):
+                        c = m.get('content', '')
+                        if isinstance(c, list):
+                            # Anthropic format — compress text blocks
+                            for blk in c:
+                                if isinstance(blk, dict) and blk.get('type') == 'text' and blk.get('text'):
+                                    txt = blk['text']
+                                    if len(txt) > 200:
+                                        blk['text'] = txt[:200] + f' ... (compressed)'
+                        elif isinstance(c, str) and len(c) > 200:
+                            m['content'] = c[:200] + f' ... (compressed)'
+                messages = head + middle + tail
+
         # ═══════════════════════════════════════════════════════════════════════
         # FORCE FIX: With max_iter=999,999 this is effectively unreachable.
         # Kept as safety net with a more informative message.
