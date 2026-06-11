@@ -10,6 +10,7 @@ echo "────────────────────────�
 echo "  CS 1.6 AI Manager — OMEGA"
 echo "──────────────────────────────────────────────"
 echo "  PORT      : ${PORT:-8000}"
+echo "  NEXUS_PORT: 8080 (message broker)"
 echo "  STATIC_DIR: ${STATIC_DIR:-/app/static}"
 echo "  Python    : $(python --version 2>&1)"
 echo "──────────────────────────────────────────────"
@@ -80,5 +81,10 @@ else:
     print("SFTP not pre-configured. Connect via the UI setup screen.")
 PY
 
-# 4) Hand off to the Python app
+# 4) Start the Nexus message broker in the background
+python /app/nexus_broker.py &
+NEXUS_PID=$!
+echo "Nexus Broker : started (PID $NEXUS_PID, port 8080)"
+
+# 5) Hand off to the main Python app
 exec python cs16-manager.py

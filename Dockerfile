@@ -155,6 +155,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # Copy the Python app
 COPY --chown=app:app cs16-manager.py ./
+COPY --chown=app:app nexus_broker.py ./
 COPY --chown=app:app cs16-config.json ./
 COPY --chown=app:app entrypoint.sh ./
 
@@ -185,7 +186,7 @@ RUN chmod +x /app/entrypoint.sh
 
 USER app
 
-EXPOSE 8000
+EXPOSE 8000 8080
 
 # Koyeb health check — hits the same endpoint the platform probes
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
