@@ -2191,6 +2191,73 @@ async def api_agent_answer(req: AnswerReq):
         return {'ok': True, 'message': 'Answer received'}
     return {'ok': False, 'error': 'No pending question found'}
 
+# ─── Nexus Message Broker (in-process) ───
+
+class _NexusBroker:
+    def __init__(self):
+        self.lock = Lock()
+        self.mailboxes: dict[str, list[dict]] = {}
+        self.global_id = 0
+
+    def _clean(self, target_id: str) -> None:
+        now = time.time()
+        if target_id in self.mailboxes:
+            self.mailboxes[target_id] = [
+                m for m in self.mailboxes[target_id] if now - m["time"] < 60
+            ]
+
+    def push(self, target_id: str, sender: str, message: str, tag: str) -> int:
+        with self.lock:
+            self.global_id += 1
+            self.mailboxes.setdefault(target_id, [])
+            self.mailboxes[target_id].append({
+                "id": self.global_id, "sender": sender,
+                "message": message, "tag": tag, "time": time.time(),
+            })
+            self._clean(target_id)
+            if len(self.mailboxes[target_id]) > 50:
+                self.mailboxes[target_id].pop(0)
+            return self.global_id
+
+    def poll(self, my_id: str, last_id: int) -> tuple[list[dict], int]:
+        with self.lock:
+            if my_id not in self.mailboxes:
+                return [], self.global_id
+            self._clean(my_id)
+            delta = [m for m in self.mailboxes[my_id] if m["id"] > last_id]
+            return delta, self.global_id
+
+_nexus_broker = _NexusBroker()
+
+class NexusPushReq(BaseModel):
+    target_id: str
+    sender: str = ""
+    message: str
+    tag: str = "SERVER"
+
+@app.post('/api/nexus/push')
+async def api_nexus_push(req: NexusPushReq):
+    try:
+        msg_id = _nexus_broker.push(
+            req.target_id.strip(),
+            req.sender.strip() or "unknown",
+            req.message.strip(),
+            req.tag.strip() or "SERVER",
+        )
+        return {"ok": True, "message_id": msg_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get('/api/nexus/poll')
+async def api_nexus_poll(my_id: str = "", last_id: int = 0):
+    if not my_id.strip():
+        return {"ok": False, "error": "my_id is required"}
+    try:
+        msgs, latest = _nexus_broker.poll(my_id.strip(), last_id)
+        return {"ok": True, "last_id": latest, "messages": msgs}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 # ─── Main ───
 
 if __name__ == '__main__':

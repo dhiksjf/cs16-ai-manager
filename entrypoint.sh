@@ -81,10 +81,5 @@ else:
     print("SFTP not pre-configured. Connect via the UI setup screen.")
 PY
 
-# 4) Start the Nexus message broker in the background
-python /app/nexus_broker.py &
-NEXUS_PID=$!
-echo "Nexus Broker : started (PID $NEXUS_PID, port 8080)"
-
-# 5) Hand off to the main Python app
+# 4) Hand off to the main Python app (Nexus broker is built-in at /api/nexus/*)
 exec python cs16-manager.py
