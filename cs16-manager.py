@@ -168,6 +168,14 @@ def sftp_read(path_str: str) -> str:
     with _sftp_lock:
         sftp_check()
         assert _sftp is not None
+        try:
+            attr = _sftp.stat(path_str)
+            if stat.S_ISDIR(attr.st_mode or 0):
+                raise IOError(f'cannot read directory as file: {path_str}')
+        except IOError:
+            raise
+        except:
+            pass
         with _sftp.open(path_str, 'r') as f:
             return f.read().decode('utf-8', errors='replace')
 
@@ -230,7 +238,10 @@ def sftp_move(source: str, destination: str):
     with _sftp_lock:
         sftp_check()
         assert _sftp is not None
-        _sftp.rename(source, destination)
+        try:
+            _sftp.rename(source, destination)
+        except Exception as e:
+            raise IOError(f'failed to move {source} -> {destination}: {e}')
 
 def sftp_copy(source: str, destination: str):
     with _sftp_lock:
@@ -245,7 +256,10 @@ def sftp_rename(old_path: str, new_path: str):
     with _sftp_lock:
         sftp_check()
         assert _sftp is not None
-        _sftp.rename(old_path, new_path)
+        try:
+            _sftp.rename(old_path, new_path)
+        except Exception as e:
+            raise IOError(f'failed to rename {old_path} -> {new_path}: {e}')
 
 def sftp_chmod(path_str: str, mode: int):
     with _sftp_lock:
