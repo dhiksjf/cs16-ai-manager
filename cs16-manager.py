@@ -648,18 +648,18 @@ TOOL_DEFS = [
     }},
     {'type': 'function', 'function': {
         'name': 'download_file',
-        'description': 'Download a file from a URL directly to the game server via SFTP. Use to grab .amxx binaries, .sma sources, or config files from the web.',
+        'description': 'Download a file from a URL. Saves to TWO places: (1) remote game server via SFTP, and (2) locally in work dir for compile_plugin/read_local. After downloading a .sma, use read_local on the local copy, then compile_plugin with the local path shown in the result.',
         'parameters': {'type': 'object', 'properties': {
             'url': {'type': 'string', 'description': 'Full URL to download from'},
-            'dest': {'type': 'string', 'description': 'Destination path on the game server, e.g. cstrike/addons/amxmodx/plugins/myplugin.amxx'}
+            'dest': {'type': 'string', 'description': 'Remote destination path on the game server (via SFTP), e.g. cstrike/addons/amxmodx/plugins/myplugin.amxx'}
         }, 'required': ['url', 'dest']}
     }},
     {'type': 'function', 'function': {
         'name': 'git_clone',
-        'description': 'Shallow-clone a git repository and upload all files to the game server via SFTP. Use to pull example plugin collections, configs, or whole plugins from GitHub.',
+        'description': 'Shallow-clone a git repository. Saves to TWO places: (1) all files uploaded to the game server via SFTP, and (2) the full clone preserved locally for read_local/compile_plugin. .sma files are also copied to a separate local dir. Use to pull example plugin collections from GitHub, then compile them.',
         'parameters': {'type': 'object', 'properties': {
             'url': {'type': 'string', 'description': 'Git URL, e.g. https://github.com/alliedmodders/amxmodx-plugins.git'},
-            'dest': {'type': 'string', 'description': 'Destination directory on the game server, e.g. cstrike/addons/amxmodx/plugins/custom'},
+            'dest': {'type': 'string', 'description': 'Destination directory on the game server (via SFTP), e.g. cstrike/addons/amxmodx/plugins/custom'},
             'depth': {'type': 'integer', 'description': 'Clone depth (default 1 for shallow)', 'default': 1}
         }, 'required': ['url', 'dest']}
     }},
@@ -777,6 +777,28 @@ COMPILER ENVIRONMENT (inside the container):
                                          xs.inc, and many more)
   Reference tests: /app/amxx/testsuite/  (25 sample plugins you can read for patterns)
   Work dir:        /tmp/amxx_work/       (write your .sma sources here)
+
+CRITICAL: LOCAL vs REMOTE FILES
+  There are TWO filesystems you work with:
+  A) LOCAL (container filesystem) — access via: read_local, write_local, list_local, compile_plugin
+     Paths like: /tmp/amxx_work/*, /app/amxx/include/*.inc, /app/amxx/testsuite/*.sma
+     compile_plugin ONLY works with files on the LOCAL filesystem.
+  B) REMOTE (game server via SFTP)   — access via: read, write, ls, delete, etc.
+     Paths like: cstrike/addons/amxmodx/configs/plugins.ini
+     download_file and git_clone save to BOTH filesystems automatically.
+  When you download_file() or git_clone(), the result message tells you the local path.
+  ALWAYS use the LOCAL path for compile_plugin, and the REMOTE path for server file ops.
+  If you need an SFTP-remote .sma for compilation, use read() then write_local() to copy it locally.
+
+COMPILATION PERSISTENCE RULE — NEVER GIVE UP:
+  When compile_plugin returns errors, you MUST fix them and retry. Do not stop until success=true.
+  Parse each error line: "file.sma:LINE: error: MESSAGE"
+  For each error: read_local() the relevant .inc header to learn the correct API, fix the .sma,
+  recompile. Repeat as many times as needed — even 20+ iterations for complex plugins.
+  If a plugin has hundreds of errors, fix them in batches: fix obvious syntax errors first,
+  then tackle undefined natives, then type mismatches. The iteration limit is 999,999 so you
+  will never be cut off mid-debug. Do NOT give up and do NOT ask the user for help with
+  compilation errors — fixing compile errors is YOUR job.
 
 PAWN / AMX MOD X SYNTAX QUICK REFERENCE:
   - Every plugin starts with: #include <amxmodx> then #include <amxmodx_sock> (etc. as needed)
@@ -918,11 +940,17 @@ EXAMPLES OF PLUGIN REQUESTS YOU CAN HANDLE:
   - "Anti-flood chat plugin"                          -> client_command + set_task
 
 DOWNLOADING EXISTING PLUGINS:
-  - To grab a known plugin from GitHub: git_clone("https://github.com/.../plugin.git",
+  - download_file() saves to BOTH remote SFTP and local filesystem automatically.
+    After the download, the result tells you the local path. Use that for compile_plugin().
+    Example: download_file("https://example.com/plugin.sma", "cstrike/.../plugin.sma")
+    -> result shows local copy at /tmp/amxx_work/plugin.sma
+    -> compile_plugin(local_path="/tmp/amxx_work/plugin.sma", upload_path="cstrike/.../plugin.amxx")
+  - git_clone() uploads to SFTP AND preserves the full local clone at /tmp/amxx_work/_cloned_REPONAME/
+    .sma files are also copied to /tmp/amxx_work/_cloned_REPONAME_sma/
+    Use read_local to browse them, then compile_plugin on any .sma.
+  - To grab from GitHub: git_clone("https://github.com/.../plugin.git",
     "cstrike/addons/amxmodx/plugins/customplugin")
-  - To fetch a single .amxx: download_file(url, "cstrike/addons/amxmodx/plugins/x.amxx")
-  - For source: download_file(sma_url, "cstrike/addons/amxmodx/plugins-custom/x.sma"),
-    then compile_plugin(local_path_of_downloaded_file, "cstrike/.../x.amxx")
+  - To fetch a single binary: download_file(url, "cstrike/addons/amxmodx/plugins/x.amxx")
 
 ═══════════════════════════════════════════════════════════════
 RCON COMMAND REFERENCE
@@ -1663,7 +1691,13 @@ async def agent_stream(req: AgentReq):
                                 resp = await client.get(url)
                             content_bytes = resp.content
                             sftp_write_binary(dest, content_bytes)
-                            result_val = f"Downloaded {len(content_bytes)} bytes ({resp.status_code}) from {url} to {dest}"
+                            dest_path = Path(dest.replace('\\', '/'))
+                            local_path = AMXX_WORK_DIR / dest_path.name
+                            local_path.parent.mkdir(parents=True, exist_ok=True)
+                            local_path.write_bytes(content_bytes)
+                            result_val = f"Downloaded {len(content_bytes)} bytes ({resp.status_code}) from {url}"
+                            result_val += f"\n  Remote: {dest} (via SFTP)"
+                            result_val += f"\n  Local:  {local_path} (for compile_plugin / read_local)"
                         except Exception as de:
                             err_text = f"Download failed: {de}"
 
@@ -1672,24 +1706,43 @@ async def agent_stream(req: AgentReq):
                         dest = args['dest']
                         depth = int(args.get('depth', 1))
                         try:
-                            with tempfile.TemporaryDirectory() as tmpdir:
-                                proc = subprocess.run(
-                                    ['git', 'clone', '--depth', str(depth), url, tmpdir],
-                                    capture_output=True, text=True, timeout=120
-                                )
-                                if proc.returncode != 0:
-                                    err_text = f"Git clone failed: {proc.stderr.strip()[:300]}"
-                                else:
-                                    count = 0
-                                    for root, _dirs, files in os.walk(tmpdir):
-                                        for fname in files:
-                                            local_f = Path(root) / fname
-                                            rel = local_f.relative_to(tmpdir)
-                                            remote_f = str(Path(dest) / rel).replace('\\', '/')
-                                            data = local_f.read_bytes()
-                                            sftp_write_binary(remote_f, data)
-                                            count += 1
-                                    result_val = f"Cloned {count} files from {url} to {dest}"
+                            # Use a persistent local directory so files survive for later use
+                            repo_name = url.rstrip('/').rsplit('/', 1)[-1].replace('.git', '') or 'repo'
+                            local_clone_dir = AMXX_WORK_DIR / f'_cloned_{repo_name}'
+                            if local_clone_dir.exists():
+                                shutil.rmtree(local_clone_dir)
+                            local_clone_dir.mkdir(parents=True, exist_ok=True)
+                            proc = subprocess.run(
+                                ['git', 'clone', '--depth', str(depth), url, str(local_clone_dir)],
+                                capture_output=True, text=True, timeout=120
+                            )
+                            if proc.returncode != 0:
+                                err_text = f"Git clone failed: {proc.stderr.strip()[:300]}"
+                            else:
+                                count = 0
+                                sma_count = 0
+                                sma_local_dir = AMXX_WORK_DIR / f'_cloned_{repo_name}_sma'
+                                if sma_local_dir.exists():
+                                    shutil.rmtree(sma_local_dir)
+                                for root, _dirs, files in os.walk(str(local_clone_dir)):
+                                    for fname in files:
+                                        local_f = Path(root) / fname
+                                        rel = local_f.relative_to(local_clone_dir)
+                                        remote_f = str(Path(dest) / rel).replace('\\', '/')
+                                        data = local_f.read_bytes()
+                                        sftp_write_binary(remote_f, data)
+                                        count += 1
+                                        # Save .sma files locally too so compile_plugin can access them
+                                        if fname.lower().endswith('.sma'):
+                                            local_sma = sma_local_dir / rel
+                                            local_sma.parent.mkdir(parents=True, exist_ok=True)
+                                            local_sma.write_bytes(data)
+                                            sma_count += 1
+                                result_val = f"Cloned {count} files from {url} to {dest} (remote)"
+                                result_val += f"\n  Local clone preserved at: {local_clone_dir}"
+                                if sma_count > 0:
+                                    result_val += f"\n  {sma_count} .sma files also saved locally at: {sma_local_dir}"
+                                    result_val += f"\n  Use compile_plugin or write_local/read_local on files in that directory."
                         except subprocess.TimeoutExpired:
                             err_text = "Git clone timed out after 120s"
                         except Exception as ge:
@@ -1743,10 +1796,11 @@ async def agent_stream(req: AgentReq):
                         return
 
                 tool_content = str(result_val) if result_val is not None else display_result
+                tool_limit = 8000 if name in ('compile_plugin', 'read_local', 'batch_read', 'web_fetch', 'web_search') else 4000
                 tool_msgs.append({
                     'role': 'tool',
                     'tool_call_id': tc['id'],
-                    'content': str(tool_content)[:4000]
+                    'content': str(tool_content)[:tool_limit]
                 })
 
                 current_task_summary['steps'].append({
