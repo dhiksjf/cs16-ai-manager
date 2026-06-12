@@ -2200,7 +2200,7 @@ async def api_agent_answer(req: AnswerReq):
 
 class _NexusBroker:
     def __init__(self):
-        self.lock = Lock()
+        self.lock = threading.Lock()
         self.mailboxes: dict[str, list[dict]] = {}
         self.global_id = 0
 
