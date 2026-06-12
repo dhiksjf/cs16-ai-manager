@@ -1945,6 +1945,11 @@ if STATIC_DIR.exists():
     if (STATIC_DIR / 'favicon.svg').exists():
         app.mount('/favicon.svg', StaticFiles(directory=STATIC_DIR, html=False), name='favicon')
 
+# Serve source-resolver (Peachify Player) at /resolver/
+RESOLVER_DIR = HERE / 'source-resolver'
+if RESOLVER_DIR.exists():
+    app.mount('/resolver', StaticFiles(directory=str(RESOLVER_DIR), html=True), name='resolver')
+
 @app.get('/api/config')
 async def get_config():
     return {**cfg}
