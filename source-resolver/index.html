@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Peachify Player</title>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https:; frame-src https:; object-src 'none';"> 
     <style>
         :root {
             --bg-primary: #0f0f12;
@@ -144,9 +143,6 @@
 </div>
 
 <script>
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js').catch(() => {});
-    }
     function play() {
         const tmdb = document.getElementById('tmdb').value;
         const type = document.getElementById('type').value;
