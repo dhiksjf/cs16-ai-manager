@@ -158,6 +158,7 @@ COPY --chown=app:app cs16-manager.py ./
 COPY --chown=app:app nexus_broker.py ./
 COPY --chown=app:app cs16-config.json ./
 COPY --chown=app:app entrypoint.sh ./
+COPY --chown=app:app source-resolver/ ./source-resolver/
 
 # Copy the amxxpc binary + amxxpc32.so from the extract stage
 COPY --from=amxx-extract --chown=root:root /usr/local/lib/amxx/ /usr/local/lib/amxx/
