@@ -15,7 +15,7 @@ new g_LastMsgId = 0
 public plugin_init() {
     register_plugin("Nexus Core: Raw Chat", "5.2-Final", "Yassine")
 
-    register_clcmd("say /crosschat", "Cmd_OpenMenu", ADMIN_RCON)
+    register_clcmd("say /crosschat", "Cmd_OpenMenu", 0)
     register_clcmd("say", "Cmd_HookSay")
     register_clcmd("say_team", "Cmd_HookSay")
 
