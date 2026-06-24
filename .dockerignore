@@ -1,0 +1,44 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Docs / examples
+*.md
+!frontend/README.md
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Compiler sources — bundled at build time from the upstream amxmodx
+# release tarball, not from any local source dir
+compiler/source/
+
+# Test files
+tests/
+test_*.py
+*_test.py
+
