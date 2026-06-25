@@ -1,10 +1,29 @@
-import { Routes, Route } from 'react-router'
-import Home from './pages/Home'
+import { Routes, Route } from 'react-router-dom';
+import { Layout } from '@/components/layout/Layout';
+import { DashboardPage } from '@/pages/DashboardPage';
+import { RepairsPage } from '@/pages/RepairsPage';
+import { RepairDetailPage } from '@/pages/RepairDetailPage';
+import { CustomersPage } from '@/pages/CustomersPage';
+import { CustomerDetailPage } from '@/pages/CustomerDetailPage';
+import { InvoicesPage } from '@/pages/InvoicesPage';
+import { InvoiceDetailPage } from '@/pages/InvoiceDetailPage';
+import { SettingsPage } from '@/pages/SettingsPage';
 
-export default function App() {
+function App() {
   return (
     <Routes>
-      <Route path="/" element={<Home />} />
+      <Route element={<Layout />}>
+        <Route path="/" element={<DashboardPage />} />
+        <Route path="/repairs" element={<RepairsPage />} />
+        <Route path="/repairs/:id" element={<RepairDetailPage />} />
+        <Route path="/customers" element={<CustomersPage />} />
+        <Route path="/customers/:id" element={<CustomerDetailPage />} />
+        <Route path="/invoices" element={<InvoicesPage />} />
+        <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+      </Route>
     </Routes>
-  )
+  );
 }
+
+export default App;
