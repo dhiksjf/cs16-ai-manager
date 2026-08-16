@@ -3,104 +3,174 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>uacapp — payload → elevated app</title>
+<title>uacapp — portable app builder</title>
 <style>
   :root {
-    --bg: #0a0e14;
-    --panel: #10161f;
-    --panel2: #151d29;
-    --line: #223042;
-    --text: #d7e1ee;
-    --muted: #74839a;
-    --accent: #4f8cff;
-    --accent2: #66ffcc;
+    --bg: #070b12;
+    --panel: #0d131d;
+    --panel2: #111a27;
+    --line: #1e2a3c;
+    --line2: #2a3a52;
+    --text: #dbe5f2;
+    --muted: #7d8ca3;
+    --accent: #5b8cff;
+    --accent2: #4ad7a8;
     --danger: #ff5c7a;
-    --mono: "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
+    --amber: #ffc857;
+    --mono: "Cascadia Mono", Consolas, "JetBrains Mono", SF Mono, monospace;
+    --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    background: radial-gradient(1200px 600px at 70% -10%, #12203a 0%, var(--bg) 55%) fixed;
+    background:
+      radial-gradient(900px 500px at 85% -10%, rgba(91,140,255,.14), transparent 60%),
+      radial-gradient(700px 420px at -10% 110%, rgba(74,215,168,.08), transparent 60%),
+      var(--bg);
     color: var(--text);
-    font-family: var(--mono);
+    font-family: var(--sans);
     min-height: 100vh;
     display: flex; flex-direction: column; align-items: center;
-    padding: 48px 20px 40px;
+    padding: 40px 20px 48px;
   }
-  .wrap { width: min(720px, 100%); }
-  header { margin-bottom: 28px; }
-  h1 { font-size: 26px; font-weight: 700; letter-spacing: 0.5px; }
+  .wrap { width: min(760px, 100%); }
+
+  header { text-align: center; margin-bottom: 30px; }
+  .brand {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 3px;
+    color: var(--muted); text-transform: uppercase;
+    padding: 6px 14px; border: 1px solid var(--line);
+    border-radius: 999px; background: rgba(13,19,29,.7);
+  }
+  .brand .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent2); box-shadow: 0 0 8px var(--accent2); }
+  h1 { font-size: 34px; font-weight: 800; letter-spacing: .5px; margin-top: 18px; }
   h1 .acc { color: var(--accent); }
-  h1 .acc2 { color: var(--accent2); }
-  p.sub { color: var(--muted); margin-top: 8px; font-size: 13px; line-height: 1.6; }
-  .badge {
-    display: inline-block; margin-top: 12px; padding: 4px 10px;
-    border: 1px solid var(--line); border-radius: 999px;
-    font-size: 11px; color: var(--accent2); background: rgba(102,255,204,.06);
+  p.sub {
+    color: var(--muted); font-size: 14px; line-height: 1.7;
+    margin: 12px auto 0; max-width: 560px;
   }
+  .status {
+    display: inline-flex; align-items: center; gap: 8px; margin-top: 16px;
+    padding: 7px 14px; border-radius: 999px; font-size: 12px;
+    font-family: var(--mono); border: 1px solid var(--line);
+    background: rgba(13,19,29,.7); color: var(--muted);
+  }
+  .status .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent2); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
   .drop {
-    margin-top: 18px;
-    background: var(--panel); border: 1.5px dashed var(--line);
-    border-radius: 14px; padding: 52px 24px; text-align: center;
-    cursor: pointer; transition: border-color .15s, background .15s, transform .1s;
     position: relative;
+    background: linear-gradient(180deg, var(--panel), var(--panel2));
+    border: 1.5px dashed var(--line2);
+    border-radius: 18px; padding: 58px 24px; text-align: center;
+    cursor: pointer;
+    transition: border-color .18s, transform .12s, box-shadow .18s;
   }
-  .drop:hover, .drop.over { border-color: var(--accent); background: var(--panel2); }
-  .drop.over { transform: scale(1.01); }
-  .drop .big { font-size: 15px; font-weight: 600; }
-  .drop .small { color: var(--muted); font-size: 12px; margin-top: 10px; line-height: 1.7; }
-  .drop .icon { font-size: 30px; margin-bottom: 14px; opacity: .8; }
+  .drop:hover, .drop.over {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px rgba(91,140,255,.08), 0 12px 40px rgba(0,0,0,.35);
+  }
+  .drop.over { transform: scale(1.008); }
   .drop input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-  .queue { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
-  .item {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-    padding: 14px 16px; display: flex; align-items: center; gap: 14px;
+  .drop .icon {
+    font-size: 34px; margin-bottom: 16px; opacity: .85;
+    filter: drop-shadow(0 0 14px rgba(91,140,255,.35));
   }
-  .item .name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .item .size { color: var(--muted); font-size: 11px; }
-  .item .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  .drop .big { font-size: 16px; font-weight: 600; }
+  .drop .small { color: var(--muted); font-size: 12px; margin-top: 10px; line-height: 1.7; }
+  .chips { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 7px; padding: 4px 10px;
+    transition: border-color .15s, color .15s;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--text); }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 22px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 16px; text-align: center;
+  }
+  .card .k { font-size: 20px; }
+  .card .t { font-size: 13px; font-weight: 600; margin-top: 10px; }
+  .card .d { color: var(--muted); font-size: 11.5px; line-height: 1.6; margin-top: 6px; }
+
+  .queue { margin-top: 22px; display: flex; flex-direction: column; gap: 10px; }
+  .item {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 13px;
+    padding: 15px 16px; display: flex; align-items: center; gap: 14px;
+    animation: slidein .22s ease;
+  }
+  @keyframes slidein { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+  .item .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  .item.busy .dot { background: var(--amber); animation: pulse 1s infinite; }
   .item.ok .dot { background: var(--accent2); }
   .item.err .dot { background: var(--danger); }
-  .item.err .name { color: var(--danger); }
-  .item .errtext { color: var(--danger); font-size: 11px; }
+  .item .name { flex: 1; font-size: 13px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .meta { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+  .item .errtext { color: var(--danger); font-size: 12px; margin-top: 4px; }
   .item.done .download {
-    background: var(--accent2); color: #06251b; text-decoration: none;
-    font-size: 12px; font-weight: 700; padding: 7px 12px; border-radius: 8px;
+    background: linear-gradient(90deg, var(--accent2), #39c49a); color: #04241a;
+    text-decoration: none; font-size: 12px; font-weight: 700;
+    padding: 8px 14px; border-radius: 9px; transition: filter .15s;
   }
-  .bar { height: 4px; margin-top: 12px; border-radius: 2px; overflow: hidden; background: #1b2533; }
+  .item.done .download:hover { filter: brightness(1.1); }
+  .item .inner { display: flex; flex-direction: column; min-width: 0; }
+  .clear {
+    margin-top: 14px; align-self: center;
+    background: none; border: 1px solid var(--line); color: var(--muted);
+    font-family: var(--mono); font-size: 11px; padding: 7px 16px; border-radius: 9px; cursor: pointer;
+    transition: border-color .15s, color .15s; display: none;
+  }
+  .clear:hover { border-color: var(--danger); color: var(--danger); }
+
+  .bar { height: 4px; margin-top: 16px; border-radius: 2px; overflow: hidden; background: #182232; display: none; }
   .bar > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .2s; }
-  .foot { margin-top: 30px; color: var(--muted); font-size: 11px; line-height: 1.8; text-align: center; }
-  .foot code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; color: var(--text); }
-  .samples { margin-top: 8px; }
-  .samples a { color: var(--accent); text-decoration: none; font-size: 12px; }
-  .samples a:hover { text-decoration: underline; }
+
+  .foot { margin-top: 34px; color: var(--muted); font-size: 11.5px; line-height: 1.9; text-align: center; }
+  .foot b { color: var(--text); font-weight: 600; }
+
+  @media (max-width: 640px) {
+    .grid { grid-template-columns: 1fr; }
+    h1 { font-size: 27px; }
+    .wrap { width: 100%; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1><span class="acc">uacapp</span> <span class="acc2">//</span> converted app builder</h1>
+    <span class="brand"><span class="dot"></span>uacapp</span>
+    <h1>Portable <span class="acc">app builder</span></h1>
     <p class="sub">
-      Drop a <b>.exe</b>, <b>.bat</b>, <b>.cmd</b>, <b>.ps1</b>, <b>.vbs</b> or <b>.msi</b> payload here and get back a
-      self-contained Windows executable that launches it <b>elevated — silently</b> (Method 61 / slui auto-elevation,
-      no UAC consent prompt). The wrapper cleans its registry machinery and temp files after the payload spawns.
+      Drop a <b>.exe</b>, <b>.bat</b>, <b>.cmd</b>, <b>.ps1</b>, <b>.vbs</b> or <b>.msi</b> file here and get back a
+      single self-contained Windows executable. No installation, no extra files — one portable .exe.
     </p>
-    <span class="badge" id="status">checking service…</span>
+    <span class="status"><span class="pulse"></span><span id="status">checking service…</span></span>
   </header>
 
   <div class="drop" id="drop">
     <div class="icon">⬇</div>
-    <div class="big">drag &amp; drop payload here</div>
-    <div class="small">or click to browse — converted app downloads as <code>&lt;name&gt;_uac.exe</code></div>
-    <input type="file" id="file" />
+    <div class="big">drag &amp; drop files here</div>
+    <div class="small">or click to browse — multiple files supported, converted output downloads as <code>&lt;name&gt;_uac.exe</code></div>
+    <input type="file" id="file" multiple />
+  </div>
+
+  <div class="chips" id="chips"></div>
+
+  <div class="grid">
+    <div class="card"><div class="k">📦</div><div class="t">Self-contained</div><div class="d">Packages the payload into a single portable .exe that launches on start.</div></div>
+    <div class="card"><div class="k">⚡</div><div class="t">Instant</div><div class="d">Converted in seconds — download the result right away.</div></div>
+    <div class="card"><div class="k">🔒</div><div class="t">Private</div><div class="d">Files are processed in memory and never stored on the server.</div></div>
   </div>
 
   <div class="queue" id="queue"></div>
-  <div class="bar" id="bar" style="display:none"><div id="barfill"></div></div>
+  <button class="clear" id="clear">clear list</button>
+  <div class="bar" id="bar"><div id="barfill"></div></div>
 
   <div class="foot">
-    payload is processed in memory, nothing is stored on the server.<br>
-    runs elevated only if the current user is a member of the <b>Administrators</b> group.<br>
-    works on Windows 10 / 11, x64. Defender may behavior-flag the output name — rename per use.
+    Output runs on Windows 10 / 11 desktop.<br>
+    Files are processed in memory — nothing is stored on the server.
   </div>
 </div>
 
@@ -111,18 +181,8 @@ const queue = document.getElementById('queue');
 const bar = document.getElementById('bar');
 const barfill = document.getElementById('barfill');
 const statusEl = document.getElementById('status');
-
-(async () => {
-  try {
-    const r = await fetch('/api/uac/info');
-    const j = await r.json();
-    statusEl.textContent = 'service ready — base ' + j.base_size_kb + ' KB · ext: ' + j.extensions.join(' ');
-    statusEl.style.color = 'var(--accent2)';
-  } catch (e) {
-    statusEl.textContent = 'service unreachable';
-    statusEl.style.color = 'var(--danger)';
-  }
-})();
+const chipsEl = document.getElementById('chips');
+const clearBtn = document.getElementById('clear');
 
 function human(n) {
   if (n < 1024) return n + ' B';
@@ -130,17 +190,35 @@ function human(n) {
   return (n / 1048576).toFixed(2) + ' MB';
 }
 
+(async () => {
+  try {
+    const j = await (await fetch('/api/uac/info')).json();
+    statusEl.textContent = 'service ready · base ' + j.base_size_kb + ' KB';
+    for (const e of j.extensions) {
+      const c = document.createElement('span');
+      c.className = 'chip';
+      c.textContent = '.' + e;
+      chipsEl.appendChild(c);
+    }
+  } catch (e) {
+    statusEl.textContent = 'service unreachable';
+    statusEl.parentElement.style.borderColor = 'var(--danger)';
+  }
+})();
+
 function addItem(name, size) {
   const el = document.createElement('div');
   el.className = 'item';
-  el.innerHTML = '<span class="dot"></span><span class="name"></span><span class="size"></span>';
+  el.innerHTML = '<span class="dot"></span><div class="inner"><span class="name"></span><span class="meta"></span></div>';
   el.querySelector('.name').textContent = name;
-  el.querySelector('.size').textContent = human(size);
+  el.querySelector('.meta').textContent = human(size);
   queue.prepend(el);
+  clearBtn.style.display = 'inline-block';
   return el;
 }
 
 function convert(file, el) {
+  el.classList.add('busy');
   bar.style.display = 'block';
   barfill.style.width = '0%';
   const xhr = new XMLHttpRequest();
@@ -152,9 +230,9 @@ function convert(file, el) {
     if (e.lengthComputable) barfill.style.width = Math.round((e.loaded / e.total) * 100) + '%';
   };
   xhr.onload = () => {
-    bar.style.display = 'none';
+    nudgeBar();
+    el.classList.remove('busy');
     if (xhr.status === 200) {
-      const ct = xhr.getResponseHeader('Content-Type') || '';
       let name = file.name.replace(/\.[^.]+$/, '') + '_uac.exe';
       let disp = xhr.getResponseHeader('Content-Disposition') || '';
       const m = disp.match(/filename="?([^";]+)"?/);
@@ -163,23 +241,23 @@ function convert(file, el) {
       const a = document.createElement('a');
       a.href = url; a.download = name;
       a.className = 'download'; a.textContent = 'download ' + name;
-      el.classList.add('done');
+      el.classList.add('ok', 'done');
+      el.querySelector('.meta').textContent = human(xhr.response.size) + ' · ready';
       el.appendChild(a);
-      a.click();
     } else {
       el.classList.add('err');
+      const d = document.createElement('div');
+      d.className = 'errtext';
+      d.textContent = 'convert failed';
       xhr.response.text().then(t => {
-        let msg = 'convert failed';
-        try { msg = JSON.parse(t).detail || msg; } catch (e) {}
-        const d = document.createElement('div');
-        d.className = 'errtext';
-        d.textContent = msg;
-        el.appendChild(d);
+        try { d.textContent = JSON.parse(t).detail; } catch (e) {}
       });
+      el.appendChild(d);
     }
   };
   xhr.onerror = () => {
-    bar.style.display = 'none';
+    nudgeBar();
+    el.classList.remove('busy');
     el.classList.add('err');
     const d = document.createElement('div');
     d.className = 'errtext';
@@ -189,22 +267,34 @@ function convert(file, el) {
   xhr.send(fd);
 }
 
+let barTimer;
+function nudgeBar() {
+  bar.style.display = 'none';
+  clearTimeout(barTimer);
+  barTimer = setTimeout(() => { barfill.style.width = '0%'; }, 400);
+}
+
+function handle(files) {
+  for (const f of files) {
+    const el = addItem(f.name, f.size);
+    convert(f, el);
+  }
+}
+
 drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
 drop.addEventListener('dragleave', () => drop.classList.remove('over'));
 drop.addEventListener('drop', e => {
   e.preventDefault();
   drop.classList.remove('over');
-  for (const f of e.dataTransfer.files) {
-    const el = addItem(f.name, f.size);
-    convert(f, el);
-  }
+  handle(e.dataTransfer.files);
 });
 fileEl.addEventListener('change', () => {
-  for (const f of fileEl.files) {
-    const el = addItem(f.name, f.size);
-    convert(f, el);
-  }
+  handle(fileEl.files);
   fileEl.value = '';
+});
+clearBtn.addEventListener('click', () => {
+  queue.innerHTML = '';
+  clearBtn.style.display = 'none';
 });
 </script>
 </body>
