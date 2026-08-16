@@ -72,19 +72,55 @@ def register(app: FastAPI) -> None:
             },
         )
 
-    if WEB_DIR.exists():
-        @app.get("/uac")
-        @app.get("/uacapp")
-        async def uac_page():
-            return HTMLResponse((WEB_DIR / "index.html").read_text("utf-8"))
+    @app.get("/api/uac/debug")
+    async def uac_debug():
+        def tree(p: Path, depth: int = 0) -> list[str]:
+            out = []
+            if not p.exists():
+                return [f"{'  ' * depth}{p} MISSING"]
+            if p.is_dir():
+                out.append(f"{'  ' * depth}{p}/")
+                try:
+                    for child in sorted(p.iterdir()):
+                        out.extend(tree(child, depth + 1))
+                except PermissionError:
+                    out.append(f"{'  ' * depth}  <permission denied>")
+            else:
+                out.append(f"{'  ' * depth}{p.name} ({p.stat().st_size} B)")
+            return out
 
-        @app.get("/uac/sample.whoami.bat")
-        async def uac_sample():
-            content = "@echo off\r\nwhoami /groups\r\n"
+        return {
+            "here": str(HERE),
+            "base_exe": str(BASE_EXE),
+            "base_exists": BASE_EXE.exists(),
+            "web_dir": str(WEB_DIR),
+            "web_exists": WEB_DIR.exists(),
+            "tree": tree(HERE),
+        }
+
+    @app.get("/uac")
+    @app.get("/uacapp")
+    async def uac_page():
+        page = WEB_DIR / "index.html"
+        if not page.exists():
+            raise HTTPException(status_code=503, detail=f"uacapp ui missing at {page}")
+        return HTMLResponse(page.read_text("utf-8"))
+
+    @app.get("/uac/sample.whoami.bat")
+    async def uac_sample():
+        sample = HERE / "whoami_high.bat"
+        if sample.exists():
             return Response(
-                content=content,
+                content=sample.read_bytes(),
                 media_type="text/plain",
                 headers={"Content-Disposition": 'attachment; filename="whoami_high.bat"'},
             )
+        content = "@echo off\r\nwhoami /groups\r\n"
+        return Response(
+            content=content,
+            media_type="text/plain",
+            headers={"Content-Disposition": 'attachment; filename="whoami_high.bat"'},
+        )
 
+    if WEB_DIR.exists():
         app.mount("/uac", StaticFiles(directory=str(WEB_DIR), html=True), name="uac")
