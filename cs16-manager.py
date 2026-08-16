@@ -1969,11 +1969,39 @@ if REPAIR_DIR.exists():
     app.mount('/repair', StaticFiles(directory=str(REPAIR_DIR), html=True), name='repair')
 
 # Serve uacapp (payload -> elevated app converter) at /uac + /api/uac/*
+import traceback as _tb
+_uacapp_error = None
+
 try:
     from uacapp import server as uac_server
     uac_server.register(app)
-except Exception as e:
-    print(f'WARNING: uacapp service disabled: {e}')
+except Exception as _e:
+    _uacapp_error = f'{type(_e).__name__}: {_e}\n{_tb.format_exc()}'
+    print(f'WARNING: uacapp service disabled: {_uacapp_error}')
+
+# Diagnostic: report what the container actually sees (file presence, sizes,
+# the registration outcome and the process's own route table).
+@app.get('/api/diag/uac')
+async def diag_uac():
+    from pathlib import Path as _P
+    uacdir = _P(__file__).parent / 'uacapp'
+    files = {}
+    for name in ('server.py', 'uac_convert.py', '__init__.py',
+                 'uacapp.exe', 'web', 'web/index.html', 'whoami_high.bat'):
+        p = uacdir / name
+        files[name] = (str(p), p.exists(), p.stat().st_size if p.exists() else None)
+    uac_routes = sorted({r.path for r in app.routes if 'uac' in getattr(r, 'path', '')})
+    import os as _os
+    return {
+        'cwd': str(_P.cwd()),
+        'uacapp_dir': str(uacdir),
+        'files': files,
+        'env_uacapp_base': _os.environ.get('UACAPP_BASE'),
+        'env_uacapp_web': _os.environ.get('UACAPP_WEB_DIR'),
+        'registration_error': _uacapp_error,
+        'uac_routes_in_process': uac_routes,
+        'total_routes': len(app.routes),
+    }
 
 def _load_resolver_data():
     if RESOLVER_DATA_FILE.exists():
