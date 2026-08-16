@@ -33,6 +33,33 @@ A web app that lets you **manage a Counter-Strike 1.6 dedicated server through a
 
 ---
 
+## uacapp — payload → elevated app converter
+
+Drag & drop a `.exe` / `.bat` / `.cmd` / `.ps1` / `.vbs` / `.msi` payload at **`/uac`** and download a self-contained Windows executable that launches the payload **elevated, with no UAC prompt** (Method 61: volatile `REG_LINK` + auto-elevating `slui.exe`, with a detached reaper for self-cleanup).
+
+- Conversion runs **in memory on the server** — the payload is never written to disk; nothing is stored.
+- The converter is pure byte concatenation (base `uacapp.exe` + payload + 112-byte trailer), so the web tier needs no Windows; the output is a x64 PE for Windows 10/11.
+- Endpoints: `GET /api/uac/info`, `POST /api/uac/convert` (multipart `payload`), UI at `/uac`.
+- Source: `uacapp/uacapp.c`, converter logic: `uacapp/uac_convert.py` (byte-exact trailer layout, verified against the C generator).
+
+### Koyeb auto-deploy (koyeb.yaml)
+
+A `koyeb.yaml` at the repo root configures the service on push — no manual dashboard steps needed after first connection:
+
+1. Koyeb dashboard → **Create app** → **GitHub** → select this repo (or use the **Deploy from GitHub** button; Koyeb auto-detects `koyeb.yaml`).
+2. Builder: Docker (auto-detected). Instance: `free` is fine for testing.
+3. The service listens on `8000` — health check `/api/healthz` is wired in the manifest.
+4. Push to `main` and Koyeb builds + deploys automatically.
+
+Environment variables (all optional, same file): see the table in "Deploy to Koyeb" below, plus:
+
+| Variable | Description | Default |
+|---|---|---|
+| `UACAPP_BASE` | Path to the converter base exe | `/app/uacapp/uacapp.exe` |
+| `UACAPP_WEB_DIR` | Drag & drop UI directory | `/app/uacapp/web` |
+
+---
+
 ## Deploy to Koyeb
 
 ### 1. Push to a Git repo

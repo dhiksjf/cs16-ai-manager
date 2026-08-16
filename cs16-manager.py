@@ -1968,6 +1968,13 @@ REPAIR_DATA_FILE = REPAIR_DIR / 'data.json'
 if REPAIR_DIR.exists():
     app.mount('/repair', StaticFiles(directory=str(REPAIR_DIR), html=True), name='repair')
 
+# Serve uacapp (payload -> elevated app converter) at /uac + /api/uac/*
+try:
+    from uacapp import server as uac_server
+    uac_server.register(app)
+except Exception as e:
+    print(f'WARNING: uacapp service disabled: {e}')
+
 def _load_resolver_data():
     if RESOLVER_DATA_FILE.exists():
         return json.loads(RESOLVER_DATA_FILE.read_text('utf-8'))
