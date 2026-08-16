@@ -25,20 +25,27 @@ ALLOWED = {".exe", ".bat", ".cmd", ".ps1", ".vbs", ".msi"}
 
 
 def register(app: FastAPI) -> None:
+    """Always register routes so /uac never 404s; degrade to a clear
+    status if the base exe is missing instead of silently skipping."""
     if not BASE_EXE.exists():
-        return
+        print(f'WARNING: uacapp base exe missing at {BASE_EXE} '
+              f'(defaulted from UACAPP_BASE or uacapp/uacapp.exe)')
 
     @app.get("/api/uac/info")
     async def uac_info():
+        ok = BASE_EXE.exists()
         return {
-            "ok": True,
-            "base_size": BASE_EXE.stat().st_size,
-            "base_size_kb": round(BASE_EXE.stat().st_size / 1024),
+            "ok": ok,
+            "base_size": BASE_EXE.stat().st_size if ok else 0,
+            "base_size_kb": round(BASE_EXE.stat().st_size / 1024) if ok else 0,
             "extensions": sorted(e.lstrip(".") for e in ALLOWED),
+            "detail": "" if ok else f"base exe missing at {BASE_EXE}",
         }
 
     @app.post("/api/uac/convert")
     async def uac_convert(payload: UploadFile):
+        if not BASE_EXE.exists():
+            raise HTTPException(status_code=503, detail=f"converter base missing at {BASE_EXE}")
         ext = Path(payload.filename or "p.exe").suffix.lower()
         if ext not in ALLOWED:
             raise HTTPException(
